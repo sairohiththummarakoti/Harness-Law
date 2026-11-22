@@ -12,6 +12,10 @@ const citation=z.object({sourceId:id,sourceVersion:revision,page:z.number().int(
 const claim=z.object({id,text,citations:z.array(citation).max(30),supportStatus:support,reviewStatus:review,locked:z.boolean(),revision,history:z.array(z.object({text,revision,author:short,at:timestamp,supportStatus:support.optional(),reviewStatus:review.optional()}).strict()).max(500)}).strict();
 const result=z.object({id,criterion,revision,sourceVersions:z.array(z.object({id,version:revision}).strict()).max(200),claims:z.array(claim).max(100),stale:z.boolean(),createdAt:timestamp,moduleVersion:short,ruleVersion:short}).strict();
 const composition=z.object({id,version:revision,selected:z.array(z.object({criterion,resultId:id,revision}).strict()).max(10),claims:z.array(claim).max(1000),stale:z.boolean(),createdAt:timestamp}).strict();
+const onboarding=z.object({version:z.literal(1),step:z.union([z.literal(1),z.literal(2),z.literal(3),z.literal(4)]),goal:z.enum(['evidence','narrative','review']).optional(),completedAt:timestamp.optional()}).strict().superRefine((value,context)=>{
+  if(value.step>=3&&!value.goal)context.addIssue({code:z.ZodIssueCode.custom,message:'A preparation goal is required after step two.'});
+  if((value.step===4)!==!!value.completedAt)context.addIssue({code:z.ZodIssueCode.custom,message:'Only completed setup has a completion timestamp.'});
+});
 export const evidenceSchema=z.object({id,name:short,version:revision,status:processing,language:short,pages:z.number().int().min(0).max(10000),bytes:z.number().int().min(0).max(20*1024*1024),kind:short,excerpt:text,associations:z.array(z.object({criterion,status:z.enum(['proposed','confirmed','removed']),actor:short,revision}).strict()).max(10),exhibit:short,uploadedAt:timestamp,sample:z.boolean(),objectId:id.optional(),issue:short.optional(),previousVersions:z.array(z.object({version:revision,name:short,excerpt:text,status:processing,at:timestamp}).strict()).max(100).optional()}).strict();
 export const caseSchema=z.object({
   id,name:short,mode:z.enum(['sample','personal']),revision,
@@ -23,6 +27,7 @@ export const caseSchema=z.object({
   composition:composition.nullable(),compositionHistory:z.array(composition).max(500).optional(),
   forms:z.object({fullName:short,address:text,country:short,intendedWork:text,reviewed:z.boolean(),templateStatus:z.enum(['unverified','current'])}).strict(),
   activities:z.array(z.object({id,title:short,detail:text,at:timestamp}).strict()).max(100),consent:z.boolean(),lastPage:short,updatedAt:timestamp,
+  onboarding:onboarding.optional(),
 }).strict();
 export const saveSchema=z.object({state:caseSchema,expectedRevision:revision}).strict();
 export const MAX_CASE_BODY=1024*1024;

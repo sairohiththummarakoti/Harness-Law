@@ -1,7 +1,11 @@
-import { getChatGPTUser } from "./chatgpt-auth";
-import Workspace from "./workspace";
-export const dynamic = "force-dynamic";
-export default async function Home() {
-  const user = await getChatGPTUser();
-  return <Workspace user={user ? { displayName: user.displayName, email: user.email } : null} />;
+import type { Metadata } from "next";
+import Landing from "./landing";
+
+export const metadata: Metadata = {
+  title: "Harness Law — A clearer path for your talent",
+  description: "Bring your experience, evidence, and working draft together. A thoughtful workspace for EB-1A preparation.",
+};
+
+export default function Home() {
+  return <Landing />;
 }

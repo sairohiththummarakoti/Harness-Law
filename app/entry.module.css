@@ -1,0 +1,45 @@
+.entry { min-height: 100vh; background: #fff; color: #172c25; font-family: 'Segoe UI', Arial, Helvetica, sans-serif; }
+.entry h1, .entry h2, .entry h3 { font-family: inherit; color: #172c25; }
+.header { max-width: 1240px; margin: 0 auto; padding: 28px 50px; min-height: 92px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.brand { display: inline-flex; align-items: center; gap: 10px; color: #214d3b; font-size: 23px; font-weight: 650; letter-spacing: -.8px; white-space: nowrap; }
+.brand svg { stroke-width: 1.6; }
+.headerAlternative { color: #68746e; font-size: 14px; }
+.headerAlternative a { color: #214d3b; font-weight: 650; margin-left: 8px; text-decoration: underline; text-underline-offset: 4px; }
+.authLayout { display: grid; grid-template-columns: 1fr 1fr; max-width: 1140px; min-height: 680px; margin: 22px auto 56px; border: 1px solid #e3e9e5; border-radius: 24px; overflow: hidden; }
+.authContent { padding: 67px 62px 55px; align-self: center; }
+.eyebrow { display: block; color: #536b5f; letter-spacing: 1.7px; font-weight: 650; font-size: 12px; margin-bottom: 18px; }
+.authContent h1 { font-size: clamp(36px, 3.4vw, 46px); line-height: 1.1; letter-spacing: -1.9px; font-weight: 550; max-width: 430px; }
+.intro { color: #627069; font-size: 16px; line-height: 1.75; margin: 22px 0 30px; }
+.primary, .secondary { display: flex; width: 100%; justify-content: center; align-items: center; gap: 10px; min-height: 54px; padding: 14px 20px; font-size: 15px; font-weight: 600; border-radius: 8px; text-align: center; transition: background .16s; }
+.primary { background: #234f3d; color: white; border: 1px solid #234f3d; }
+.primary:hover { background: #173f2e; }
+.providerIcon { font-size: 25px; line-height: 18px; font-weight: 400; }
+.secondary { color: #2d483b; background: white; border: 1px solid #d8e1da; }
+.secondary:hover { background: #f4f7f4; }
+.authNote, .smallNote { font-size: 13px; color: #6b7770; line-height: 1.65; text-align: center; margin-top: 13px; }
+.smallNote { font-size: 12px; }
+.divider { margin: 27px 0; display: flex; align-items: center; gap: 14px; font-size: 12px; color: #6e7770; }
+.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #e8ece7; }
+.signedIn { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; color: #557061; background: #f1f7f2; border-radius: 8px; padding: 12px 14px; margin-bottom: 15px; overflow-wrap: anywhere; }
+.authAside { background: #e7f1e9; padding: 48px 42px 36px; display: flex; flex-direction: column; justify-content: center; }
+.asideHeading { margin-bottom: 28px; }
+.asideHeading .eyebrow { font-size: 12px; margin-bottom: 13px; }
+.asideHeading h2 { font-size: 31px; line-height: 1.2; letter-spacing: -1px; font-weight: 500; }
+.preview { border: 1px solid #d7e1d9; background: #fff; border-radius: 12px; box-shadow: 0 16px 30px #2b573411; transform: rotate(-1.3deg); }
+.previewBar { padding: 16px 18px; border-bottom: 1px solid #e8ece8; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.previewLogo { display: flex; align-items: center; gap: 6px; color: #3a5b46; font-size: 12px; font-weight: 600; }
+.previewBadge { padding: 4px 6px; font-size: 12px; border-radius: 4px; background: #f1f4ed; color: #5d6d5a; }
+.previewBody { padding: 24px 23px 19px; }
+.previewIcon { width: 48px; height: 48px; background: #f2f5e9; color: #71805c; border-radius: 9px; display: grid; place-items: center; margin-bottom: 15px; }
+.previewBody h3 { font-size: 19px; font-weight: 550; letter-spacing: -.5px; }
+.previewBody > p { font-size: 14px; color: #6c786f; margin-top: 5px; }
+.previewList { list-style: none; padding: 0; margin: 22px 0 0; }
+.previewList li { padding: 13px 0; display: flex; align-items: center; gap: 12px; border-top: 1px solid #edf0eb; }
+.previewList li > span { display: grid; place-items: center; background: #f0f5ef; color: #50755a; width: 29px; height: 29px; flex-shrink: 0; border-radius: 50%; font-size: 12px; }
+.previewList strong { display: block; font-size: 14px; font-weight: 550; }
+.previewList small { display: block; font-size: 12px; margin-top: 3px; color: #6e7770; }
+.asideNote { display: flex; gap: 12px; font-size: 14px; line-height: 1.65; color: #587061; margin-top: 29px; max-width: 345px; }
+.footer { max-width: 1140px; margin: 0 auto; padding: 0 0 28px; display: flex; justify-content: space-between; gap: 15px; color: #6c7871; font-size: 12px; }
+@media (max-width: 1050px) { .authLayout { margin: 18px 32px 40px; } .authContent { padding: 45px 36px; } .authAside { padding: 38px 28px; } .header { padding: 24px 32px; } .footer { padding: 0 32px 24px; } .previewBar { flex-wrap: wrap; } }
+@media (max-width: 720px) { .header { padding: 22px 24px; align-items: flex-start; } .headerAlternative { max-width: 126px; text-align: right; font-size: 12px; } .headerAlternative a { display: block; margin: 3px 0 0; } .brand { font-size: 21px; gap: 7px; } .authLayout { display: block; max-width: 520px; margin: 8px auto 30px; border: 0; border-radius: 0; min-height: 0; } .authContent { padding: 32px 28px 38px; } .authContent h1 { font-size: 41px; max-width: 370px; } .intro { margin-top: 18px; font-size: 16px; } .authAside { margin: 0 20px; padding: 30px 25px; border-radius: 16px; } .asideHeading h2 { font-size: 27px; } .preview { max-width: 350px; margin: 0 auto; width: 100%; } .asideNote { margin-left: auto; margin-right: auto; } .footer { font-size: 12px; padding: 0 24px 24px; } }
+@media (prefers-reduced-motion: reduce) { .primary, .secondary { transition: none; } }
