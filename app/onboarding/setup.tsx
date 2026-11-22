@@ -12,7 +12,7 @@ import styles from "./setup.module.css";
 const steps = ["Your work", "Your focus", "Make it yours"];
 const goalIcons = { evidence: FolderOpen, narrative: PencilLine, review: FileCheck2 };
 
-export default function Onboarding({ initialName, signInPath }: { initialName: string; signInPath: string }) {
+export default function Onboarding({ initialName, signInPath, accountId }: { initialName: string; signInPath: string; accountId: string }) {
   const router = useRouter();
   const [caseState, setCaseState] = useState<CaseState | null>(null);
   const [answers, setAnswers] = useState<Answers>({ field: "", role: "", goal: "", fullName: initialName, preferredName: "" });
@@ -38,7 +38,7 @@ export default function Onboarding({ initialName, signInPath }: { initialName: s
   const loadCase = useCallback(async (signal?: AbortSignal) => {
     setLoading(true); setError(""); setSessionExpired(false);
     try {
-      const response = await requestCase({ credentials: "same-origin", cache: "no-store", signal });
+      const response = await requestCase({ credentials: "same-origin", cache: "no-store", headers: { "X-Harness-Account": accountId }, signal });
       const result = response.data;
       if (!response.ok || !result.state || result.revision === undefined) {
         if (response.status === 401) setSessionExpired(true);
@@ -85,7 +85,7 @@ export default function Onboarding({ initialName, signInPath }: { initialName: s
   async function loadLatestForComparison() {
     setConflictNeedsLoad(true); setSessionExpired(false);
     try {
-      const response = await requestCase({ credentials: "same-origin", cache: "no-store" });
+      const response = await requestCase({ credentials: "same-origin", cache: "no-store", headers: { "X-Harness-Account": accountId } });
       const result = response.data;
       if (!response.ok || !result.state || result.revision === undefined) {
         if (response.status === 401) setSessionExpired(true);
@@ -107,7 +107,7 @@ export default function Onboarding({ initialName, signInPath }: { initialName: s
         : { fullName: answers.fullName, preferredName: answers.preferredName };
       const updated = applyOnboardingStep(base, step, stepAnswers);
       const response = await requestCase({
-        method: "PUT", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+        method: "PUT", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-Harness-Account": accountId },
         body: JSON.stringify({ state: updated, expectedRevision: base.revision }),
       });
       const result = response.data;
@@ -158,7 +158,7 @@ export default function Onboarding({ initialName, signInPath }: { initialName: s
 
       {(loading || opening) && <section className={styles.loading} aria-live="polite"><Loader2 className={styles.spinner} size={28} /><h1>{opening ? "Opening your workspace…" : "Getting your workspace ready…"}</h1><p>Your saved case stays with you.</p></section>}
 
-      {!loading && !opening && !caseState && <section className={styles.loadError}><h1>Let’s try that again.</h1><p role="alert">{error}</p>{sessionExpired ? <a className={styles.primary} href={signInPath} target="_top">Sign in with ChatGPT</a> : <button className={styles.primary} onClick={() => void loadCase()}>Retry loading your case</button>}<a className={styles.quietLink} href="/">Back to home</a></section>}
+      {!loading && !opening && !caseState && <section className={styles.loadError}><h1>Let’s try that again.</h1><p role="alert">{error}</p>{sessionExpired ? <a className={styles.primary} href={signInPath} target="_top">Sign in to your account</a> : <button className={styles.primary} onClick={() => void loadCase()}>Retry loading your case</button>}<a className={styles.quietLink} href="/">Back to home</a></section>}
 
       {showForm && <form onSubmit={event => void saveStep(event)} className={styles.form}>
         <div className={styles.stepHeading}>
@@ -184,7 +184,7 @@ export default function Onboarding({ initialName, signInPath }: { initialName: s
           </>}
         </fieldset>
 
-        {error && <div className={styles.error} role="alert"><p>{error}</p>{sessionExpired && <><a href={signInPath} target="_blank" rel="noopener noreferrer">Sign in again with ChatGPT (new tab)</a><p>Then return here and retry. Your unsaved answers stay in this window.</p></>}{conflictNeedsLoad && <button type="button" disabled={saving} onClick={() => void loadLatestForComparison()}>Load latest saved answers</button>}</div>}
+        {error && <div className={styles.error} role="alert"><p>{error}</p>{sessionExpired && <><a href={signInPath} target="_blank" rel="noopener noreferrer">Sign in again (new tab)</a><p>Then return here and retry. Your unsaved answers stay in this window.</p></>}{conflictNeedsLoad && <button type="button" disabled={saving} onClick={() => void loadLatestForComparison()}>Load latest saved answers</button>}</div>}
         {conflict && <section className={styles.conflict} aria-label="Compare saved setup">
           {isRemoteInProgress ? <><h2>Your saved workspace is ready.</h2><p>Another session has already moved this case forward. Open the latest saved case to continue.</p><a className={styles.primary} href="/workspace">Open saved workspace</a></> : <>
             <h2>{step === 3 ? "Latest saved setup" : "Latest saved answers"}</h2><dl>{setupConflictRows(conflict, step).map(row => <div key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl><p>{step === 3 ? "Completing setup will use the saved field, role, and focus above with the names you choose. Your entered names remain in the fields above." : "Your answers remain in the fields above. Choose which answers to use for this step."}</p>
