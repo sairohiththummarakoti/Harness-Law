@@ -1,0 +1,112 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Private immutable-version evidence storage for Harness Law. Creates no users or access keys.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [development, staging, production]
+  ApplicationRoleName:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|[A-Za-z0-9_+=,.@-]{1,64}'
+    Description: Optional existing IAM role name. Leave empty to attach the generated policy separately.
+
+Conditions:
+  HasApplicationRole:
+    Fn::Not:
+      - Fn::Equals: [{ Ref: ApplicationRoleName }, '']
+
+Resources:
+  EvidenceBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortUnfinishedMultipartTransfers
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+      Tags:
+        - Key: Application
+          Value: HarnessLaw
+        - Key: Environment
+          Value: { Ref: Environment }
+        - Key: DataClass
+          Value: PrivateApplicantEvidence
+
+  EvidenceBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Bucket: { Ref: EvidenceBucket }
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: RequireTLS
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - Fn::GetAtt: [EvidenceBucket, Arn]
+              - Fn::Sub: '${EvidenceBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  ApplicationStoragePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Read exact source versions and write immutable Harness Law objects. No evidence deletion or bucket administration.
+      Roles:
+        Fn::If:
+          - HasApplicationRole
+          - [{ Ref: ApplicationRoleName }]
+          - { Ref: 'AWS::NoValue' }
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ReadAndCreateApplicationObjects
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:PutObject
+            Resource:
+              - Fn::Sub: '${EvidenceBucket.Arn}/quarantine/*'
+              - Fn::Sub: '${EvidenceBucket.Arn}/renditions/*'
+              - Fn::Sub: '${EvidenceBucket.Arn}/extractions/*'
+              - Fn::Sub: '${EvidenceBucket.Arn}/exports/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'true'
+
+Outputs:
+  EvidenceBucketName:
+    Description: Set HARNESS_S3_BUCKET to this value in the server configuration.
+    Value: { Ref: EvidenceBucket }
+  EvidenceBucketRegion:
+    Description: Set HARNESS_S3_REGION to this value in the server configuration.
+    Value: { Ref: 'AWS::Region' }
+  EvidenceBucketArn:
+    Value: { Fn::GetAtt: [EvidenceBucket, Arn] }
+  ApplicationPolicyArn:
+    Description: Attach to the workload identity that obtains server-side credentials; this template creates no credentials.
+    Value: { Ref: ApplicationStoragePolicy }

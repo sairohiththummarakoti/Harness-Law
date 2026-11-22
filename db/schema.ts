@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 export const cases=sqliteTable('cases',{
   ownerId:text('owner_id').primaryKey(),
@@ -16,3 +16,19 @@ export const evidenceObjects=sqliteTable('evidence_objects',{
   metadataJson:text('metadata_json').notNull(),
   createdAt:text('created_at').notNull(),
 });
+
+export const integrationCases=sqliteTable('integration_cases',{
+  caseId:text('case_id').primaryKey(),
+  ownerId:text('owner_id').notNull().unique(),
+  revision:integer('revision').notNull().default(0),
+  commitToken:text('commit_token').notNull(),
+  nextJobAt:text('next_job_at'),
+  updatedAt:text('updated_at').notNull(),
+},table=>[index('integration_cases_next_job').on(table.nextJobAt)]);
+
+export const integrationCaseChunks=sqliteTable('integration_case_chunks',{
+  caseId:text('case_id').notNull().references(()=>integrationCases.caseId),
+  revision:integer('revision').notNull(),
+  chunkIndex:integer('chunk_index').notNull(),
+  payload:text('payload').notNull(),
+},table=>[primaryKey({columns:[table.caseId,table.revision,table.chunkIndex]})]);

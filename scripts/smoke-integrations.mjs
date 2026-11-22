@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+const base = 'http://127.0.0.1:5184';
+const owner = `smoke-${crypto.randomUUID()}`;
+const identity = { 'oai-authenticated-user-id': owner, 'oai-authenticated-user-email': 'synthetic@example.test' };
+async function call(method, path, value, extra = {}) {
+  const response = await fetch(base + path, { method, headers: { ...identity, Origin: base, 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID(), ...extra }, body: value === undefined ? undefined : JSON.stringify(value) });
+  return { status: response.status, body: await response.json() };
+}
+assert.equal((await fetch(base + '/v1/cases')).status, 401);
+const createKey = crypto.randomUUID();
+const created = await call('POST', '/v1/cases', { processing_consent: true }, { 'Idempotency-Key': createKey });
+assert.equal(created.status, 201, JSON.stringify(created.body));
+const id = created.body.case_id;
+const replay = await call('POST', '/v1/cases', { processing_consent: true }, { 'Idempotency-Key': createKey });
+assert.equal(replay.body.case_id, id);
+assert.equal((await call('GET', `/v1/cases/${id}`, undefined, { 'oai-authenticated-user-id': 'another-synthetic-owner' })).status, 404);
+const fact = await call('POST', `/v1/cases/${id}/facts`, { key: 'display_name', value: 'Synthetic applicant', confirmed: true });
+assert.equal(fact.status, 201, JSON.stringify(fact.body));
+const updated = await call('PATCH', `/v1/cases/${id}/facts/${fact.body.fact_id}`, { expected_revision: 1, value: 'Revised synthetic applicant', confirmed: true });
+assert.equal(updated.status, 200);
+assert.equal((await call('PATCH', `/v1/cases/${id}/facts/${fact.body.fact_id}`, { expected_revision: 1, value: 'Stale edit', confirmed: true })).status, 409);
+const bytes = new TextEncoder().encode('%PDF-1.7\nSynthetic isolated runtime fixture\n%%EOF');
+const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(b => b.toString(16).padStart(2, '0')).join('');
+const session = await call('POST', `/v1/cases/${id}/upload-sessions`, { title: 'Synthetic fixture.pdf', media_type: 'application/pdf', bytes: bytes.length, sha256: digest });
+assert.equal(session.status, 201, JSON.stringify(session.body));
+const put = await fetch(base + session.body.upload_grant.url, { method: 'PUT', headers: { ...identity, Origin: base, 'Content-Type': 'application/pdf', 'Idempotency-Key': crypto.randomUUID() }, body: bytes });
+assert.equal(put.status, 200, await put.text());
+const confirmed = await call('POST', `/v1/cases/${id}/upload-sessions/${session.body.upload_id}/confirm`, {});
+assert.equal(confirmed.status, 201, JSON.stringify(confirmed.body));
+assert.equal(confirmed.body.document.state, 'quarantined');
+assert.equal((await call('GET', `/v1/cases/${id}/documents/${confirmed.body.document.document_version_id}/view`)).status, 404);
+console.log(JSON.stringify({ passed: true, checks: ['authentication', 'case isolation', 'idempotency', 'D1 persistence', 'fact CAS', 'R2 upload', 'checksum confirmation', 'quarantine view denial'], environment: 'isolated local Wrangler + D1 + R2' }));

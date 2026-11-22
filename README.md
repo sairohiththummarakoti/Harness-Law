@@ -35,12 +35,14 @@ Uploads require explicit processing consent and have a 20 MB per-file limit. Upl
 
 ## Service integration boundaries
 
-This is a working preparation MVP, not a production filing system. Only the UI/UX specification was provided; the five referenced specifications and production providers were not supplied. The interface exposes these boundaries rather than reporting simulated production success:
+This is a working preparation MVP. The UI/UX and integration/API specifications have now been implemented at their respective layers. The new authoritative `/v1` backend has versioned upload sessions, processing jobs, criterion execution, citation validation, composition, form mapping and exact-byte packet approval. See [integration setup and release boundaries](docs/integrations.md) and the [OpenAPI contract](docs/openapi.v1.json). The existing workspace continues to use the legacy UI APIs until its controls are migrated; production providers and approved rule/template registries must be activated before personal processing is available.
+
+The interface exposes these current boundaries:
 
 - Malware scanning, OCR, and structured extraction are not connected. Sample passages are fictional fixtures.
 - Sample criterion runs are deterministic demonstrations. Production AI modules and an approved, versioned rule registry are not connected.
 - Form fields and a preparation preview are available; an official form template and versioned field mapping need integration and validation.
-- Working drafts can be downloaded. Final filing-package assembly, exact-byte approval, and government submission are not implemented; finalization remains blocked.
+- Working drafts can be downloaded. The `/v1` packet candidate and exact-byte approval API is implemented and tested with synthetic fixtures; live finalization remains blocked until a validated renderer and reviewed templates/rules are configured. Government submission is outside this release.
 - Attorney engagement, sharing, invitations, and review permissions are not enabled. Attorney review is optional in the requirements, not a universal filing gate.
 - Hosted authentication uses ChatGPT sign-in. A separate email/password registration, recovery, and verification service is not included.
 
@@ -52,6 +54,9 @@ Criterion execution status, evidence support, human review, and composition read
 - `app/globals.css`: responsive visual system.
 - `lib/model.ts`: typed case state, actions, dependencies, and review rules.
 - `app/api/`: authenticated persistence and quarantine upload endpoints.
+- `app/v1/`, `lib/integrations/`: authoritative versioned APIs, provider adapters and durable job processing.
+- `docs/openapi.v1.json`, `docs/integrations.md`: API schemas, setup and production activation requirements.
+- `infra/harness-storage.yaml`: private S3 storage and scoped application policy template; no credentials or deployments are created automatically.
 - `db/schema.ts` and `drizzle/`: database schema and migrations.
 - `tests/`: regression tests for domain invariants.
 - `.openai/hosting.json`: Site identity and D1/R2 bindings.
