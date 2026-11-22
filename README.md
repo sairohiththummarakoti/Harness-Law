@@ -29,7 +29,7 @@ Domain tests cover revision handling and the evidence-to-composition rules. The 
 
 ## Data and access
 
-Hosted access is private to the Site owner. Application API routes require an authenticated user and key stored case data by that identity. D1 stores the case and revision; R2 holds quarantined uploads. Saves use optimistic concurrency to report a conflict rather than silently replacing another revision. The sample can be explored without submitting personal information.
+The hosted application is open to visitors. ChatGPT sign-in is required for a personal workspace; application API routes key stored case data by the authenticated identity. Each user has a separate private case. D1 stores the case and revision; R2 holds quarantined uploads. Saves use optimistic concurrency to report a conflict rather than silently replacing another revision. The fictional sample can be explored without signing in or submitting personal information. The source repository remains private.
 
 Uploads require explicit processing consent and have a 20 MB per-file limit. Uploaded files remain quarantined with a **Needs attention** status. They cannot be used as extracted evidence or previewed by the application while malware scanning and extraction are unavailable.
 
