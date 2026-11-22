@@ -1,8 +1,8 @@
 import AuthEntry from "../auth-entry";
-import { getChatGPTUser } from "../chatgpt-auth";
+import { getAppUser, googleSignInEnabled } from "../auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function SigninPage() {
-  return <AuthEntry user={await getChatGPTUser()} mode="signin" />;
+  return <AuthEntry user={await getAppUser()} googleEnabled={googleSignInEnabled()} mode="signin" />;
 }

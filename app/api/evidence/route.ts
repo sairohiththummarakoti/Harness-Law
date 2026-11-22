@@ -1,12 +1,14 @@
+import { matchesExpectedAccount } from '@/lib/account-context';
 import { env } from 'cloudflare:workers';
-import { getChatGPTUser } from '@/app/chatgpt-auth';
+import { getAppUser } from '@/app/auth';
 import { database, json, parseCase, readCase, sameOrigin } from '@/lib/api';
 import { MAX_FILE_BYTES, readLimitedBody, safeFilename, validUploadName } from '@/lib/validation';
 import type { Evidence } from '@/lib/model';
 export const dynamic='force-dynamic';
 
 export async function POST(request:Request){
-  const user=await getChatGPTUser();if(!user)return json({error:'Sign in to upload evidence.',code:'session_expired'},401);
+  const user=await getAppUser();if(!user)return json({error:'Sign in to upload evidence.',code:'session_expired'},401);
+  if(!matchesExpectedAccount(request,user.userId))return json({error:"Your session changed. Sign in to the account used in this tab before continuing.",code:"session_changed"},401);
   if(!sameOrigin(request))return json({error:'This upload request did not originate from this app.'},403);
   if(!request.headers.get('content-type')?.includes('multipart/form-data'))return json({error:'Use the document upload form.'},415);
   const contentLength=Number(request.headers.get('content-length')||0);

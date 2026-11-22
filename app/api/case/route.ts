@@ -1,16 +1,19 @@
-import { getChatGPTUser } from '@/app/chatgpt-auth';
+import { matchesExpectedAccount } from '@/lib/account-context';
+import { getAppUser } from '@/app/auth';
 import { database, initialCase, json, parseCase, readCase, sameOrigin, validateEvidenceOwnership } from '@/lib/api';
 import { MAX_CASE_BODY, readLimitedBody, saveSchema } from '@/lib/validation';
 import type { CaseState } from '@/lib/model';
 export const dynamic='force-dynamic';
 
-export async function GET(){
-  const user=await getChatGPTUser();if(!user)return json({error:'Sign in to open your saved case.',code:'session_expired'},401);
+export async function GET(request:Request){
+  const user=await getAppUser();if(!user)return json({error:'Sign in to open your saved case.',code:'session_expired'},401);
+  if(!matchesExpectedAccount(request,user.userId))return json({error:"Your session changed. Sign in to the account used in this tab before continuing.",code:"session_changed"},401);
   try{const row=await readCase(user.userId);const state=row?parseCase(row):await initialCase(user.userId);return json({state,revision:state.revision});}
   catch{return json({error:'Case storage is temporarily unavailable. Your unsaved changes have not been marked saved.',code:'storage_unavailable'},503);}
 }
 export async function PUT(request:Request){
-  const user=await getChatGPTUser();if(!user)return json({error:'Sign in again to save your changes.',code:'session_expired'},401);
+  const user=await getAppUser();if(!user)return json({error:'Sign in again to save your changes.',code:'session_expired'},401);
+  if(!matchesExpectedAccount(request,user.userId))return json({error:"Your session changed. Sign in to the account used in this tab before continuing.",code:"session_changed"},401);
   if(!sameOrigin(request))return json({error:'This save request did not originate from this app.'},403);
   if(!request.headers.get('content-type')?.includes('application/json'))return json({error:'Send case updates as JSON.'},415);
   const length=Number(request.headers.get('content-length')||0);if(length>MAX_CASE_BODY)return json({error:'This case is too large to save in one request.'},413);

@@ -7,7 +7,7 @@ The sample case uses fictional people, organizations, documents, and claims. It 
 ## Visitor and setup flow
 
 - `/` is the public talent visa preparation landing page. Its walkthrough and previews describe the implemented **EB-1A** workspace only.
-- `/signup` and `/signin` provide focused entry screens. Continue with ChatGPT uses the real hosted sign-in endpoint and returns to `/onboarding`; there is no email/password collection or simulated provider login. Signed-in visitors can continue directly.
+- `/signup` and `/signin` provide focused entry screens. Google Identity Services is available when the owner configures `HARNESS_GOOGLE_CLIENT_ID`; it verifies identity server-side and returns to `/onboarding`. ChatGPT remains available through the real hosted sign-in endpoint; there is no email/password collection or simulated provider login. Signed-in visitors can continue directly.
 - `/onboarding` guides new applicants through professional field and role, a preparation goal, and their full and preferred names. Each accepted step saves through the case API with revision checking. Back navigation and reload retain accepted answers; save failures keep the current answers available to retry. A concurrent save requires reviewing the newer version before continuing.
 - `/workspace` opens a signed-in applicant's saved case and last page. Anonymous visitors see the fictional sample, and `/workspace?sample=1` always opens an isolated fictional sample, including when signed in.
 
@@ -40,7 +40,7 @@ Domain tests cover revision handling and the evidence-to-composition rules. Setu
 
 ## Data and access
 
-The hosted application is open to visitors. ChatGPT sign-in is required for a personal workspace; application API routes key stored case data by the authenticated identity. Each user has a separate private case. D1 stores the case and revision; R2 holds quarantined uploads. Saves use optimistic concurrency to report a conflict rather than silently replacing another revision. The fictional sample can be explored without signing in or submitting personal information. The source repository remains private.
+The hosted application is open to visitors. Google (when configured) or ChatGPT sign-in is required for a personal workspace; application API routes key stored case data by the authenticated identity. Each user has a separate private case. D1 stores the case and revision; R2 holds quarantined uploads. Saves use optimistic concurrency to report a conflict rather than silently replacing another revision. The fictional sample can be explored without signing in or submitting personal information. The source repository remains private.
 
 Uploads require explicit processing consent and have a 20 MB per-file limit. Uploaded files remain quarantined with a **Needs attention** status. They cannot be used as extracted evidence or previewed by the application while malware scanning and extraction are unavailable.
 
@@ -55,7 +55,7 @@ The interface exposes these current boundaries:
 - Form fields and a preparation preview are available; an official form template and versioned field mapping need integration and validation.
 - Working drafts can be downloaded. The `/v1` packet candidate and exact-byte approval API is implemented and tested with synthetic fixtures; live finalization remains blocked until a validated renderer and reviewed templates/rules are configured. Government submission is outside this release.
 - Attorney engagement, sharing, invitations, and review permissions are not enabled. Attorney review is optional in the requirements, not a universal filing gate.
-- Hosted authentication uses ChatGPT sign-in. A separate email/password registration, recovery, and verification service is not included.
+- Authentication supports direct Google identity with revocable application sessions plus hosted ChatGPT sign-in. Google activation requires the owner’s public OAuth web client ID. See [Google sign-in setup](docs/google-signin-setup.md). Email/password registration is not included.
 
 Criterion execution status, evidence support, human review, and composition readiness are independent. None expresses an immigration eligibility conclusion or approval probability. The application links to the maintained [USCIS extraordinary ability guidance](https://www.uscis.gov/policy-manual/volume-6-part-f-chapter-2).
 

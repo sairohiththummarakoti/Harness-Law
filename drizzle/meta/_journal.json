@@ -15,6 +15,13 @@
       "when": 1795387384658,
       "tag": "0001_integration_cases",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1795389026806,
+      "tag": "0002_google_signin",
+      "breakpoints": true
     }
   ]
 }
