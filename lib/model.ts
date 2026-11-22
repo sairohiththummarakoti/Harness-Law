@@ -14,7 +14,9 @@ export interface CriterionResult { id:string; criterion:string; revision:number;
 export interface CriterionRun { criterion:string; generation:number; status:'idle'|'queued'|'running'|'succeeded'|'failed'|'canceled'; stage:string; error?:string; questions:string[]; result:CriterionResult|null; history:CriterionResult[] }
 export interface Composition { id:string; version:number; selected:{criterion:string;resultId:string;revision:number}[]; claims:Claim[]; stale:boolean; createdAt:string }
 export interface Activity { id:string;title:string;detail:string;at:string }
-export interface CaseState { id:string;name:string;mode:'sample'|'personal';revision:number;profile:Profile;professional:Professional;criteria:string[];documents:Evidence[];facts:Fact[];runs:Record<string,CriterionRun>;composition:Composition|null;compositionHistory?:Composition[];forms:Forms;activities:Activity[];consent:boolean;lastPage:string;updatedAt:string }
+export type OnboardingGoal = 'evidence' | 'narrative' | 'review';
+export interface Onboarding { version:1;step:1|2|3|4;goal?:OnboardingGoal;completedAt?:string }
+export interface CaseState { id:string;name:string;mode:'sample'|'personal';revision:number;profile:Profile;professional:Professional;criteria:string[];documents:Evidence[];facts:Fact[];runs:Record<string,CriterionRun>;composition:Composition|null;compositionHistory?:Composition[];forms:Forms;activities:Activity[];consent:boolean;lastPage:string;updatedAt:string;onboarding?:Onboarding }
 export interface Blocker { id:string;title:string;detail:string;page:string }
 export const GUIDANCE_URL='https://www.uscis.gov/policy-manual/volume-6-part-f-chapter-2';
 export const CRITERIA = [

@@ -4,6 +4,17 @@ An applicant workspace for organizing EB-1A evidence, reviewing source-linked cr
 
 The sample case uses fictional people, organizations, documents, and claims. It demonstrates the workflow and must not be used as filing material.
 
+## Visitor and setup flow
+
+- `/` is the public talent visa preparation landing page. Its walkthrough and previews describe the implemented **EB-1A** workspace only.
+- `/signup` and `/signin` provide focused entry screens. Continue with ChatGPT uses the real hosted sign-in endpoint and returns to `/onboarding`; there is no email/password collection or simulated provider login. Signed-in visitors can continue directly.
+- `/onboarding` guides new applicants through professional field and role, a preparation goal, and their full and preferred names. Each accepted step saves through the case API with revision checking. Back navigation and reload retain accepted answers; save failures keep the current answers available to retry. A concurrent save requires reviewing the newer version before continuing.
+- `/workspace` opens a signed-in applicant's saved case and last page. Anonymous visitors see the fictional sample, and `/workspace?sample=1` always opens an isolated fictional sample, including when signed in.
+
+Setup completion records an optional, versioned `onboarding` object in the existing case JSON. No database migration is needed. Completion never confirms profile facts, grants processing consent, or records evidence or attorney review. An evidence goal opens the evidence library, a narrative goal opens criteria selection, and a review goal opens final review; the chosen focus is also visible in the workspace.
+
+Completed users and nonempty legacy cases bypass setup. Legacy data is not copied into a fresh case or silently overwritten. An empty personal case is eligible for setup even if it already has a saved revision or navigation history. Existing applicants can continue working without a setup requirement.
+
 ## Run locally
 
 Requirements: Node.js 22.13 or later and npm.
@@ -25,7 +36,7 @@ npm test
 npm run build
 ```
 
-Domain tests cover revision handling and the evidence-to-composition rules. The user interface additionally needs browser testing for keyboard navigation, responsive layouts, save recovery, file upload, and citation focus restoration.
+Domain tests cover revision handling and the evidence-to-composition rules. Setup tests cover backward compatibility, preservation of established cases, accepted-step resumption, goal destinations, strict metadata validation, and the separation of setup from legal-fact confirmation. The user interface additionally needs browser testing for keyboard navigation, responsive layouts, save recovery, file upload, and citation focus restoration.
 
 ## Data and access
 
@@ -51,6 +62,9 @@ Criterion execution status, evidence support, human review, and composition read
 ## Code structure
 
 - `app/workspace.tsx`: applicant screens and interactions.
+- `app/page.tsx`, `app/landing.tsx`: public landing and interactive product walkthrough.
+- `app/signup/`, `app/signin/`, `app/onboarding/`, `app/workspace/`: entry, setup, and workspace routes.
+- `lib/onboarding.ts`: pure setup transitions, preservation rules, and goal-specific next actions.
 - `app/globals.css`: responsive visual system.
 - `lib/model.ts`: typed case state, actions, dependencies, and review rules.
 - `app/api/`: authenticated persistence and quarantine upload endpoints.
