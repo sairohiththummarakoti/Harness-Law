@@ -32,3 +32,16 @@ export const integrationCaseChunks=sqliteTable('integration_case_chunks',{
   chunkIndex:integer('chunk_index').notNull(),
   payload:text('payload').notNull(),
 },table=>[primaryKey({columns:[table.caseId,table.revision,table.chunkIndex]})]);
+
+export const authChallenges=sqliteTable('auth_challenges',{
+  nonceHash:text('nonce_hash').primaryKey(),
+  expiresAt:integer('expires_at').notNull(),
+},table=>[index('auth_challenges_expiry').on(table.expiresAt)]);
+
+export const authSessions=sqliteTable('auth_sessions',{
+  tokenHash:text('token_hash').primaryKey(),
+  userId:text('user_id').notNull(),
+  email:text('email').notNull(),
+  fullName:text('full_name'),
+  expiresAt:integer('expires_at').notNull(),
+},table=>[index('auth_sessions_expiry').on(table.expiresAt)]);

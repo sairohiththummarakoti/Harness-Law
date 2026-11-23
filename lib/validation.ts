@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import { getIntakeSteps, intakeCompletionError, intakeStepError } from './intake.ts';
+import { VISA_IDS, type VisaType } from './intake-catalog.ts';
+import { isBirthCountryCode, isCitizenshipCode } from './countries.ts';
 const short=z.string().max(500);
 const text=z.string().max(50000);
 const id=z.string().min(1).max(150);
@@ -16,6 +19,34 @@ const onboarding=z.object({version:z.literal(1),step:z.union([z.literal(1),z.lit
   if(value.step>=3&&!value.goal)context.addIssue({code:z.ZodIssueCode.custom,message:'A preparation goal is required after step two.'});
   if((value.step===4)!==!!value.completedAt)context.addIssue({code:z.ZodIssueCode.custom,message:'Only completed setup has a completion timestamp.'});
 });
+export const intakeSchema=z.object({
+  version:z.literal(1),step:z.enum(['basics','visa','birth','citizenships','background','criteria','review']),
+  answers:z.object({
+    fullName:short,phone:z.string().max(100),helpFor:z.enum(['','myself','employees']),
+    visaType:z.union([z.literal(''),z.enum(VISA_IDS as [VisaType,...VisaType[]])]),
+    birthCountry:z.string().refine(value=>value===''||isBirthCountryCode(value),'Choose a valid country of birth.'),
+    birthCountryOther:z.string().max(200),
+    citizenships:z.array(z.string().refine(isCitizenshipCode,'Choose a valid citizenship.')).max(20),
+    field:short,role:short,criteria:z.array(criterion).max(10),criteriaUnsure:z.boolean(),
+    majorAward:z.enum(['','yes','no','unsure']),notes:z.string().max(3000),
+  }).strict(),completedAt:timestamp.optional(),
+}).strict().superRefine((value,context)=>{
+  const issue=(message:string)=>context.addIssue({code:z.ZodIssueCode.custom,message});
+  const answers=value.answers;
+  if(new Set(answers.citizenships).size!==answers.citizenships.length)issue('Each citizenship can be selected only once.');
+  if(answers.citizenships.includes('STATELESS')&&answers.citizenships.length>1)issue('Stateless cannot be combined with a citizenship.');
+  if(new Set(answers.criteria).size!==answers.criteria.length)issue('Each criterion can be selected only once.');
+  if(answers.criteriaUnsure&&answers.criteria.length)issue('Choose criteria or indicate that you are not sure yet.');
+  if(answers.visaType!=='eb1a'&&(answers.criteria.length||answers.criteriaUnsure||answers.majorAward))issue('EB-1A experience answers require an EB-1A intake.');
+  if(answers.birthCountry!=='OTHER'&&answers.birthCountryOther)issue('The additional country name is only used for another or historical place of birth.');
+  const steps=getIntakeSteps(answers.visaType),index=steps.indexOf(value.step);
+  if(index<0)issue('This intake step is not available for the selected visa.');
+  else for(const step of steps.slice(0,index)){const error=intakeStepError(answers,step);if(error){issue(error);break;}}
+  if(value.completedAt){
+    if(value.step!=='review')issue('Completed intake must be on the review step.');
+    const error=intakeCompletionError(answers);if(error)issue(error);
+  }
+});
 export const evidenceSchema=z.object({id,name:short,version:revision,status:processing,language:short,pages:z.number().int().min(0).max(10000),bytes:z.number().int().min(0).max(20*1024*1024),kind:short,excerpt:text,associations:z.array(z.object({criterion,status:z.enum(['proposed','confirmed','removed']),actor:short,revision}).strict()).max(10),exhibit:short,uploadedAt:timestamp,sample:z.boolean(),objectId:id.optional(),issue:short.optional(),previousVersions:z.array(z.object({version:revision,name:short,excerpt:text,status:processing,at:timestamp}).strict()).max(100).optional()}).strict();
 export const caseSchema=z.object({
   id,name:short,mode:z.enum(['sample','personal']),revision,
@@ -27,7 +58,7 @@ export const caseSchema=z.object({
   composition:composition.nullable(),compositionHistory:z.array(composition).max(500).optional(),
   forms:z.object({fullName:short,address:text,country:short,intendedWork:text,reviewed:z.boolean(),templateStatus:z.enum(['unverified','current'])}).strict(),
   activities:z.array(z.object({id,title:short,detail:text,at:timestamp}).strict()).max(100),consent:z.boolean(),lastPage:short,updatedAt:timestamp,
-  onboarding:onboarding.optional(),
+  onboarding:onboarding.optional(),intake:intakeSchema.optional(),
 }).strict();
 export const saveSchema=z.object({state:caseSchema,expectedRevision:revision}).strict();
 export const MAX_CASE_BODY=1024*1024;

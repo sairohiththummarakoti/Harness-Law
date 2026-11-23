@@ -1,9 +1,9 @@
-import { chatGPTSignInPath, requireChatGPTUser } from "../chatgpt-auth";
+import { requireAppUser } from "../auth";
 import Onboarding from "./setup";
 
 export const dynamic = "force-dynamic";
 
 export default async function OnboardingPage() {
-  const user = await requireChatGPTUser("/onboarding");
-  return <Onboarding initialName={user.fullName ?? ""} signInPath={chatGPTSignInPath("/onboarding")} />;
+  const user = await requireAppUser();
+  return <Onboarding accountId={user.userId} initialName={user.fullName ?? ""} initialEmail={user.email} signInPath="/signin" />;
 }

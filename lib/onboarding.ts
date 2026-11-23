@@ -30,6 +30,7 @@ export function hasExistingPreparation(state: CaseState): boolean {
 }
 
 export function getOnboardingRoute(state: CaseState): 'setup' | 'workspace' {
+  if (state.mode !== 'sample' && state.intake) return state.intake.completedAt ? 'workspace' : 'setup';
   if (state.mode === 'sample' || state.onboarding?.completedAt || state.onboarding?.step === 4) return 'workspace';
   if (!state.onboarding && hasExistingPreparation(state)) return 'workspace';
   return 'setup';

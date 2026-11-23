@@ -1,3 +1,4 @@
+import type { CaseIntake } from './intake';
 export type SupportStatus = 'unassessed' | 'supported' | 'needs_review' | 'conflicting' | 'evidence_missing';
 export type ReviewStatus = 'unreviewed' | 'applicant_reviewed' | 'attorney_reviewed';
 export type AssociationStatus = 'proposed' | 'confirmed' | 'removed';
@@ -16,13 +17,13 @@ export interface Composition { id:string; version:number; selected:{criterion:st
 export interface Activity { id:string;title:string;detail:string;at:string }
 export type OnboardingGoal = 'evidence' | 'narrative' | 'review';
 export interface Onboarding { version:1;step:1|2|3|4;goal?:OnboardingGoal;completedAt?:string }
-export interface CaseState { id:string;name:string;mode:'sample'|'personal';revision:number;profile:Profile;professional:Professional;criteria:string[];documents:Evidence[];facts:Fact[];runs:Record<string,CriterionRun>;composition:Composition|null;compositionHistory?:Composition[];forms:Forms;activities:Activity[];consent:boolean;lastPage:string;updatedAt:string;onboarding?:Onboarding }
+export interface CaseState { id:string;name:string;mode:'sample'|'personal';revision:number;profile:Profile;professional:Professional;criteria:string[];documents:Evidence[];facts:Fact[];runs:Record<string,CriterionRun>;composition:Composition|null;compositionHistory?:Composition[];forms:Forms;activities:Activity[];consent:boolean;lastPage:string;updatedAt:string;onboarding?:Onboarding;intake?:CaseIntake }
 export interface Blocker { id:string;title:string;detail:string;page:string }
 export const GUIDANCE_URL='https://www.uscis.gov/policy-manual/volume-6-part-f-chapter-2';
 export const CRITERIA = [
   {id:'C01',title:'Prizes and awards',shortTitle:'Awards',description:'Nationally or internationally recognized prizes or awards for excellence in your field.',examples:['Award certificates','Selection criteria and award context']},
   {id:'C02',title:'Selective memberships',shortTitle:'Memberships',description:'Memberships that require outstanding achievements, judged by recognized experts.',examples:['Membership criteria','Evidence of expert selection']},
-  {id:'C03',title:'Published material about you',shortTitle:'Published material',description:'Material about your work in professional or major trade publications or other major media.',examples:['Articles with title, date, and author','Publication reach and context']},
+  {id:'C03',title:'Published material about you',shortTitle:'Published material',description:'Published material about you, relating to your work, in professional or major trade publications or other major media.',examples:['Articles with title, date, and author','Publication reach and context']},
   {id:'C04',title:'Judging the work of others',shortTitle:'Judging',description:'Your participation as a judge of others’ work in the same or an allied field.',examples:['Completed peer reviews','Judging records and confirmation']},
   {id:'C05',title:'Original contributions',shortTitle:'Contributions',description:'Original scientific, scholarly, artistic, athletic, or business-related contributions of major significance.',examples:['Documented adoption or influence','Independent evidence of significance']},
   {id:'C06',title:'Scholarly authorship',shortTitle:'Authorship',description:'Authorship of scholarly articles in professional or major trade publications or other major media.',examples:['Published scholarly articles','Publication information']},
