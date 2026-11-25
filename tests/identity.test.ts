@@ -30,3 +30,10 @@ test('production ignores development-only credentials while HTTP development acc
   assert.deepEqual(await resolveIdentity(marker, false, async () => { throw new Error('dev cookie trusted in production'); }, async () => native), { ...native, provider: 'chatgpt' });
   assert.deepEqual(await resolveIdentity(marker, true, async secure => { assert.equal(secure, false); return google; }, unexpectedNative), google);
 });
+
+test('password provider selection takes precedence over stale Google and hosted identities', async () => {
+  const marker = `${cookieNames(true).provider}=password`;
+  const password={...native,userId:'password:abc',provider:'password' as const};
+  assert.deepEqual(await resolveIdentity(`${marker}; ${cookieNames(true).session}=ignored`,false,async()=>google,unexpectedNative,async()=>password),password);
+  assert.equal(await resolveIdentity(marker,false,async()=>null,unexpectedNative,async()=>null),null);
+});

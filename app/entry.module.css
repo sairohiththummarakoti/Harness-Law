@@ -14,6 +14,33 @@
 .backdropCards > div { flex: 1; padding: 45px 24px; background: #dce9df; border-radius: 13px; }
 .backdropCards strong { display: block; margin: 16px 0 8px; }
 .authContent { width: 100%; max-width: 552px; border: 1px solid #e0e7e1; background: #fff; padding: 38px 40px 32px; border-radius: 16px; box-shadow: 0 22px 75px #1c38221c; }
+.emailForm { display:grid; gap:15px; }
+.emailForm>label:not(.termsCheck) { display:grid; gap:7px; color:#334d3e; font-size:14px; font-weight:600; }
+.emailForm input:not([type=checkbox]) { width:100%; min-height:46px; padding:10px 12px; border:1px solid #bdcbc0; border-radius:6px; color:#182f28; font:inherit; }
+.passwordField { position:relative; display:flex; align-items:center; }
+.passwordField input { padding-right:62px !important; }
+.passwordField button { position:absolute; right:8px; border:0; background:transparent; color:#315c43; font:inherit; cursor:pointer; }
+.termsCheck { display:flex; gap:9px; align-items:flex-start; font-size:13px; line-height:1.5; }
+.termsCheck input { margin-top:3px; }
+.termsCheck a,.formLink { color:#315c43; text-decoration:underline; }
+.rememberRow { display: flex; align-items: center; justify-content: space-between; font-size: 13px; gap: 10px; }
+.rememberCheck { display: flex; align-items: center; gap: 7px; color: #334d3e; cursor: pointer; }
+.rememberCheck input { width: auto !important; min-height: 0 !important; cursor: pointer; }
+.fieldHint { font-size: 12px; color: #62766a; font-weight: 400; margin-top: -2px; }
+.strengthBar { display: flex; gap: 4px; height: 4px; margin-top: 6px; }
+.strengthSegment { flex: 1; border-radius: 2px; background: #e0e7e1; transition: background 0.2s ease; }
+.strengthWeak { background: #e06a55; }
+.strengthMedium { background: #e0a355; }
+.strengthStrong { background: #3d8a55; }
+.strengthLabel { display: flex; justify-content: space-between; font-size: 11px; color: #62766a; margin-top: 4px; }
+.unverifiedBanner { display: flex; flex-direction: column; gap: 8px; background: #fffaf0; border: 1px solid #eed6aa; color: #845311; padding: 12px 14px; border-radius: 6px; font-size: 14px; }
+.unverifiedBtn { align-self: flex-start; padding: 6px 12px; background: #234f3d; color: #fff; border: 0; border-radius: 5px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.resendBox { margin-top: 8px; padding-top: 12px; border-top: 1px dashed #d5ded7; display: grid; gap: 8px; }
+.formError,.formMessage { margin:0; padding:11px 13px; border-radius:6px; font-size:14px; }
+.formError { color:#7b3928; background:#fff4ef; border:1px solid #e8c7bd; }
+.formMessage { color:#27563e; background:#eff7f0; border:1px solid #ccdfce; }
+.formLink,.textButton { justify-self:center; font:inherit; font-size:14px; }
+.textButton { border:0; background:transparent; color:#315c43; text-decoration:underline; cursor:pointer; }
 .cardHeading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .cardHeading h1 { font-size: 32px; line-height: 1.2; letter-spacing: -.8px; font-weight: 600; }
 .cardHeading a { color: #295a44; font-size: 14px; text-decoration: underline; text-underline-offset: 4px; }
@@ -41,6 +68,118 @@
 .providerRetry { margin-top: 12px; padding: 8px 12px; border: 1px solid #234f3d; border-radius: 6px; color: #234f3d; background: #fff; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
 .switchAccount { margin: 14px 0 0; text-align: center; }
 .switchAccount button { padding: 6px 8px; border: 0; color: #365d46; background: transparent; font: inherit; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+
+.oauthContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+.googleContainer {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+.oauthNotice {
+  padding: 10px 14px;
+  background: #fff8e6;
+  border: 1px solid #f2db99;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #7a5400;
+  text-align: left;
+}
+.oauthNotice p { margin: 0; line-height: 1.5; }
+.oauthNotice button {
+  align-self: flex-end;
+  background: none;
+  border: none;
+  color: #523800;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.oauthBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid #d4ddd6;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1f3025;
+  font-size: 14px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+}
+.oauthBtn:hover {
+  background: #f7faf8;
+  border-color: #abbcb0;
+}
+.oauthRow {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+.oauthBtnSecondary {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid #d4ddd6;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #27382d;
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+}
+.oauthBtnSecondary:hover {
+  background: #f7faf8;
+  border-color: #abbcb0;
+}
+.oauthBtnChatGPT {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 16px;
+  border: 1px solid #10a37f;
+  border-radius: 8px;
+  background: #f0fdf4;
+  color: #0f6f57;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+}
+.oauthBtnChatGPT:hover {
+  background: #e1f9eb;
+  border-color: #0c8c6c;
+}
+.oauthIcon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
 .whatNext { margin-top: 28px; padding: 21px 0 0; border-top: 1px solid #e5ebe6; }
 .whatNext > span { color: #52705f; font-size: 12px; font-weight: 650; letter-spacing: 1.3px; }
 .whatNext p { color: #52665a; font-size: 15px; line-height: 1.6; margin: 9px 0 14px; }

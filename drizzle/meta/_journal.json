@@ -22,6 +22,20 @@
       "when": 1795389026806,
       "tag": "0002_google_signin",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1795550000000,
+      "tag": "0003_password_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1795551000000,
+      "tag": "0004_account_policy_versions",
+      "breakpoints": true
     }
   ]
 }

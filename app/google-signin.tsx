@@ -176,7 +176,10 @@ export default function GoogleSignIn() {
     {(status === "loading" || status === "signing-in") && <p className={styles.providerStatus} role="status">{status === "loading" ? "Loading Google sign-in…" : "Signing you in…"}</p>}
     {status === "error" && <div className={styles.providerError}>
       <p role="alert">{error}</p>
-      <button className={styles.providerRetry} type="button" onClick={() => setAttempt((value) => value + 1)}>Try Google sign-in again</button>
+      <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '12px', flexWrap: 'wrap' }}>
+        <button className={styles.providerRetry} type="button" onClick={() => setAttempt((value) => value + 1)}>Retry Google One-Tap</button>
+        <a className={styles.providerRetry} href="/api/auth/oauth/google" style={{ textDecoration: 'none' }}>Sign in with Google OAuth</a>
+      </div>
     </div>}
   </div>;
 }

@@ -1,7 +1,8 @@
 import { Check, CheckCircle2, FileText, FolderOpen, Scale, ShieldCheck } from "lucide-react";
 import type { AppUser } from "./auth";
-import GoogleSignIn from "./google-signin";
 import styles from "./entry.module.css";
+import AuthForm from "./auth-form";
+import OAuthProviders from "./oauth-providers";
 
 export default function AuthEntry({ user, mode = "signup", googleEnabled = false }: { user: AppUser | null; mode?: "signup" | "signin"; googleEnabled?: boolean }) {
   const signingIn = mode === "signin";
@@ -18,17 +19,17 @@ export default function AuthEntry({ user, mode = "signup", googleEnabled = false
       <section className={styles.authContent} aria-labelledby="entry-title">
         <div className={styles.cardHeading}><h1 id="entry-title">{signingIn ? "Log in" : "Sign up"}</h1><a href={signingIn ? "/signup" : "/signin"}>{signingIn ? "Create an account" : "I have an account"}</a></div>
         <p className={styles.intro}>{signingIn ? "Welcome back. Continue your saved immigration intake and preparation." : "A few questions. A clearer starting point for your immigration journey."}</p>
-        {user && <div className={styles.signedIn}><Check size={18} /><span>Signed in {user.provider === "google" ? "with Google" : "with ChatGPT"} as <strong>{user.displayName}</strong></span></div>}
-        {googleEnabled && user?.provider !== "google" && <>
-          <GoogleSignIn />
-          <div className={styles.providerDivider}><span>{user ? "Or use your current account" : "Or"}</span></div>
-        </>}
-        {user ? <a className={styles.primary} href="/onboarding">{googleEnabled && user.provider === "chatgpt" ? "Continue with my ChatGPT account" : signingIn ? "Continue to my portal" : "Let’s get started"}</a> : <>
-          <form action="/api/auth/chatgpt" method="post" target="_top"><button className={googleEnabled ? [styles.secondary, styles.providerAlternative].join(" ") : styles.primary} type="submit"><span className={styles.providerIcon} aria-hidden="true">✳</span>Continue with ChatGPT</button></form>
-          {!googleEnabled && <p className={styles.authNote}>Create your account using ChatGPT to save your answers.</p>}
-        </>}
-        {user?.provider === "google" && <form action="/api/auth/logout" method="post" target="_top" className={styles.switchAccount}><button type="submit">Use another account</button></form>}
-        {googleEnabled && user?.provider !== "google" && <p className={styles.providerNote}>Google and ChatGPT sign-ins have separate workspaces. Use the same method each time.</p>}
+        <AuthForm mode={signingIn?"signin":"signup"} />
+        <div className={styles.providerDivider}><span>Or continue with OAuth</span></div>
+        {user && <div className={styles.signedIn}><Check size={18} /><span>Signed in {user.provider === "google" ? "with Google" : user.provider === "password" ? "with email" : "with ChatGPT"} as <strong>{user.displayName}</strong></span></div>}
+        {user ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <a className={styles.primary} href="/onboarding">{signingIn ? "Continue to my portal" : "Let’s get started"}</a>
+            <form action="/api/auth/logout" method="post" target="_top" className={styles.switchAccount}><button type="submit">Use another account</button></form>
+          </div>
+        ) : (
+          <OAuthProviders googleEnabled={googleEnabled} />
+        )}
         <div className={styles.whatNext}><span>AFTER YOU SIGN UP</span><p>Tell us about your visa plans, your background, and the evidence you may have.</p><div><ShieldCheck size={17} /><span>Your progress is saved to your account.</span></div></div>
         <div className={styles.divider}><span>Take a look first</span></div>
         <a className={styles.sampleLink} href="/workspace?sample=1"><FolderOpen size={17} />Explore the EB-1A sample</a>

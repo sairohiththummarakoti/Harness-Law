@@ -18,6 +18,15 @@ const managedLinux = readExecutionProfile() === "managed-linux";
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
+  // Local Wrangler delivery is simulated unless a remote email binding is
+  // explicitly requested. Never add `remote: true` to the default config.
+  send_email: [{ name: "EMAIL" }],
+  vars: {
+    HARNESS_MAIL_MODE: process.env.HARNESS_MAIL_MODE || "local",
+    ...(process.env.HARNESS_GOOGLE_CLIENT_ID ? { HARNESS_GOOGLE_CLIENT_ID: process.env.HARNESS_GOOGLE_CLIENT_ID } : {}),
+    ...(process.env.FIREBASE_API_KEY ? { FIREBASE_API_KEY: process.env.FIREBASE_API_KEY } : {}),
+    ...(process.env.FIREBASE_PROJECT_ID ? { FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID } : {}),
+  },
   d1_databases: d1
     ? [
         {
