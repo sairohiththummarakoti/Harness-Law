@@ -1,4 +1,4 @@
-import { Check, CheckCircle2, FileText, FolderOpen, Scale, ShieldCheck } from "lucide-react";
+import { Check, FolderOpen, Scale, ShieldCheck } from "lucide-react";
 import type { AppUser } from "./auth";
 import GoogleSignIn from "./google-signin";
 import styles from "./entry.module.css";
@@ -7,14 +7,15 @@ export default function AuthEntry({ user, mode = "signup", googleEnabled = false
   const signingIn = mode === "signin";
   return <div className={styles.entry}>
     <header className={styles.header}>
-      <a className={styles.brand} href="/" aria-label="Harness Law home"><Scale size={28} /><span>Harness Law</span></a>
+      <a className={styles.brand} href="/" aria-label="Harness Law home"><Scale size={28} /><span>Harness Law<span className={styles.brandDot}>.</span></span></a>
       <a className={styles.homeLink} href="/">Back to home</a>
     </header>
     <main className={styles.authLayout}>
-      <div className={styles.backdrop} aria-hidden="true">
-        <div className={styles.backdropNav}><Scale size={25} /> Harness Law <span>Your immigration journey</span></div>
-        <div className={styles.backdropContent}><h2>Your next chapter<br />starts with a clear plan.</h2><div className={styles.backdropCards}><div><FileText size={30} /><strong>Your background</strong><p>A place for your story.</p></div><div><CheckCircle2 size={30} /><strong>Your preparation</strong><p>One step at a time.</p></div><div><FolderOpen size={30} /><strong>Your evidence</strong><p>Everything together.</p></div></div></div>
-      </div>
+      <aside className={styles.storyPanel} aria-label="Your immigration journey">
+        <img className={styles.storyArtwork} src="/images/harness-horizon.webp" alt="" width="1254" height="1254" />
+        <div className={styles.storyCopy}><p className={styles.eyebrow}>YOUR IMMIGRATION JOURNEY</p><h2>Your next chapter.<br /><span>A clearer beginning.</span></h2><p>Your background, your preparation, and your evidence. Together in one thoughtful workspace.</p></div>
+        <p className={styles.storyFoot}>YOUR EXPERIENCE. YOUR EVIDENCE. YOUR STORY.</p>
+      </aside>
       <section className={styles.authContent} aria-labelledby="entry-title">
         <div className={styles.cardHeading}><h1 id="entry-title">{signingIn ? "Log in" : "Sign up"}</h1><a href={signingIn ? "/signup" : "/signin"}>{signingIn ? "Create an account" : "I have an account"}</a></div>
         <p className={styles.intro}>{signingIn ? "Welcome back. Continue your saved immigration intake and preparation." : "A few questions. A clearer starting point for your immigration journey."}</p>

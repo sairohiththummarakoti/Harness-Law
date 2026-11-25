@@ -7,6 +7,8 @@ import { applyIntakeStep, getIntakeSteps, intakeAnswersFromCase, mergeIntakeStep
 import { INTAKE_STEP_LABELS, VISA_OPTIONS } from "@/lib/intake-catalog";
 import { BIRTH_COUNTRIES, CITIZENSHIP_OPTIONS, countryName } from "@/lib/countries";
 import { requestCase } from "@/lib/case-request";
+import { FileFormImport } from "@/components/file-form-import";
+import { applyIntakeImportPatch, intakeImportFields } from "@/lib/form-import-fields";
 import styles from "./setup.module.css";
 
 type Choice = { value: string; label: string; description?: string };
@@ -214,7 +216,7 @@ export default function Onboarding({ initialName, initialEmail, signInPath, acco
 
   return <div className={styles.setup}>
     <header className={styles.header}>
-      <a className={styles.brand} href="/" aria-label="Harness Law home"><Scale size={27} /><span>Harness Law</span></a>
+      <a className={styles.brand} href="/" aria-label="Harness Law home"><Scale size={27} /><span>Harness Law<span className={styles.brandDot}>.</span></span></a>
       <span className={styles.headerNote}><ShieldCheck size={17} /><span>Your private intake</span></span>
     </header>
     <main className={styles.main}>
@@ -227,6 +229,7 @@ export default function Onboarding({ initialName, initialEmail, signInPath, acco
       {!loading && caseState && !completed && <form onSubmit={event => void saveStep(event)} className={styles.card}>
         <div className={styles.cardTop}><span className={styles.sectionLabel}>{INTAKE_STEP_LABELS[step]}</span><span className={styles.savedLabel}>{!hasDraftChanges && <Check size={14} />}{saving ? "Saving…" : hasDraftChanges ? "Unsaved answers" : caseState.intake ? "Progress saved" : "Signed in"}</span></div>
         <div className={styles.stepHeading}><h1 ref={heading} tabIndex={-1}>{headings[step].title}</h1><p>{headings[step].description}</p></div>
+        <FileFormImport contextKey={`${accountId}:${caseState.id}:${step}`} fields={intakeImportFields(step)} values={{ ...answers }} disabled={blocked || sessionExpired} saveNote="Only answers on this step are filled. Review them, then Continue to save this step." onApply={values => setAnswers(current => applyIntakeImportPatch(current, step, values))} />
         <fieldset className={styles.fields} disabled={saving}>
           <legend className={styles.srOnly}>{INTAKE_STEP_LABELS[step]}</legend>
           {step === "basics" && <>
