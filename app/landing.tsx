@@ -70,7 +70,7 @@ function ProductPreview() {
 }
 
 function StagePreview({ stage }: { stage: number }) {
-  return <div className={[styles.stageVisual, styles[`stageVisual${stage}`]].filter(Boolean).join(' ')}>
+  return <div className={styles.stageVisual}>
     <span className={styles.visualLabel}>FICTIONAL SAMPLE · MAYA CHEN</span>
     {stage === 0 && <div className={styles.profileSheet}>
       <div className={styles.profileHeading}><span className={styles.largeAvatar}>MC</span><div><h3>Maya Chen</h3><p>Researcher. Builder. Collaborator.</p></div></div>
@@ -120,29 +120,30 @@ export default function Landing() {
     <a className={styles.skipLink} href="#main-content">Skip to content</a>
     <header className={styles.cinematicHeader}>
       <div className={styles.cinematicNav}>
-        <nav className={styles.audienceNav} aria-label="Main navigation"><a href="#individuals">For Individuals</a><a href="#businesses">For Businesses</a><a href="#attorney-review">Attorneys</a></nav>
-        <Link className={styles.wordmark} href="/" aria-label="Harness Law home">HARNESS LAW</Link>
-        <div className={styles.cinematicActions}><a className={styles.navResource} href="#how-it-works">Resources</a><a className={styles.navResource} href="#about">About Us</a><a className={styles.signInButton} href="/signin">SIGN IN</a><a className={styles.getStartedButton} href="/signup">GET STARTED</a><button type="button" className={styles.cinematicMenuButton} aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} aria-controls="mobile-navigation" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={23} /> : <Menu size={23} />}</button></div>
+        <Brand />
+        <nav className={styles.audienceNav} aria-label="Main navigation"><a href="#individuals">For individuals</a><a href="#businesses">For businesses</a><a href="#attorney-review">Attorneys</a></nav>
+        <div className={styles.cinematicActions}><a className={styles.navResource} href="#how-it-works">Resources</a><a className={styles.navResource} href="#about">About us</a><a className={styles.signInButton} href="/signin">Sign in</a><a className={styles.getStartedButton} href="/signup">Get started</a><button type="button" className={styles.cinematicMenuButton} aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} aria-controls="mobile-navigation" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={22} /> : <Menu size={22} />}</button></div>
       </div>
-      {menuOpen && <nav className={styles.cinematicMobileNav} id="mobile-navigation" aria-label="Mobile navigation"><a onClick={() => setMenuOpen(false)} href="#individuals">For Individuals</a><a onClick={() => setMenuOpen(false)} href="#businesses">For Businesses</a><a onClick={() => setMenuOpen(false)} href="#attorney-review">Attorneys</a><a onClick={() => setMenuOpen(false)} href="#how-it-works">Resources</a><a onClick={() => setMenuOpen(false)} href="#about">About Us</a><a href="/signin">Sign in</a></nav>}
+      {menuOpen && <nav className={styles.cinematicMobileNav} id="mobile-navigation" aria-label="Mobile navigation"><a onClick={() => setMenuOpen(false)} href="#individuals">For individuals</a><a onClick={() => setMenuOpen(false)} href="#businesses">For businesses</a><a onClick={() => setMenuOpen(false)} href="#attorney-review">Attorneys</a><a onClick={() => setMenuOpen(false)} href="#how-it-works">Resources</a><a onClick={() => setMenuOpen(false)} href="#about">About us</a><a href="/signin">Sign in</a><a href="/signup">Get started</a></nav>}
     </header>
     <main id="main-content">
       <section className={styles.cinematicHero} aria-labelledby="hero-title">
-        <div className={styles.heroPhoto} aria-hidden="true"><img src="/images/harness-law-hero.jpg" alt="" fetchPriority="high" width={2000} height={1125} /></div>
-        <div className={styles.heroShade} aria-hidden="true" />
+        <div className={styles.heroArtwork} aria-hidden="true"><img src="/images/harness-horizon.webp" alt="" width="1254" height="1254" fetchPriority="high" /></div>
         <div className={styles.cinematicContent}>
-          <div className={styles.heroBadge}><span>H</span>Immigration preparation, made clearer</div>
-          <h1 id="hero-title">Boutique immigration<br />preparation for:<em>Individuals.</em></h1>
-          <p>A focused home for your immigration journey. Bring your background, achievements, and evidence together, with a workspace built for EB-1A preparation.</p>
-          <a className={styles.heroStartButton} href="/signup">GET STARTED</a>
+          <div className={styles.heroCopy}>
+            <p className={styles.heroBadge}>A NEW PERSPECTIVE ON EB-1A PREPARATION</p>
+            <h1 id="hero-title">Your talent.<br /><span>A new horizon.</span></h1>
+            <p className={styles.heroDescription}>You’ve built a career worth telling. Bring your achievements, evidence, and ambitions together and take a thoughtful next step.</p>
+            <div className={styles.heroLinks}><a className={styles.heroStartButton} href="/signup">Begin your next chapter</a></div>
+          </div>
         </div>
-        <div className={styles.disciplineStrip} aria-label="Fields of achievement"><span>Science</span><span>Technology</span><span>Business</span><span>Arts</span><span>Education</span><span>Athletics</span></div>
+        <div className={styles.heroFoot}><a href="#individuals">Discover a clearer way to prepare <ChevronDown size={18} aria-hidden="true" /></a><span>YOUR EXPERIENCE. YOUR EVIDENCE. YOUR STORY.</span></div>
       </section>
-      <section id="workspace" className={`${styles.container} ${styles.previewSection}`} aria-label="Explore the workspace"><ProductPreview /></section>
-      <section id="individuals" className={`${styles.container} ${styles.introduction}`} aria-labelledby="intro-title"><p className={styles.eyebrow}>YOUR NEXT CHAPTER, WITH MORE CLARITY</p><h2 id="intro-title">Big ambitions.<br />One place to get organized.</h2><p>Preparing a talent visa case can mean connecting years of work. Harness Law gives your EB-1A preparation a home, from the first document to a carefully reviewed working draft.</p></section>
+      <div className={styles.disciplineStrip} aria-label="Fields of achievement"><span>Science</span><span>Technology</span><span>Business</span><span>Arts</span><span>Education</span><span>Athletics</span></div>
+      <section id="individuals" className={`${styles.container} ${styles.introduction}`} aria-labelledby="intro-title"><p className={styles.eyebrow}>YOUR NEXT CHAPTER, WITH MORE CLARITY</p><h2 id="intro-title">Big ambitions.<br /><span className={styles.editorialAccent}>One place to get organized.</span></h2><p>Preparing a talent visa case can mean connecting years of work. Harness Law gives your EB-1A preparation a home, from the first document to a carefully reviewed working draft.</p><div id="workspace" className={styles.workspaceShowcase}><ProductPreview /></div></section>
       <section id="how-it-works" className={`${styles.container} ${styles.walkthrough}`} aria-labelledby="walkthrough-title">
         <div className={styles.sectionHeading}><div><p className={styles.eyebrow}>FROM EXPERIENCE TO EVIDENCE</p><h2 id="walkthrough-title">Make your next step<br />a clear one.</h2></div><p>A flexible place to prepare.<br />{' '}Start where you are. Build as you go.</p></div>
-        <div className={styles.stageTabs} role="tablist" aria-label="Preparation stages">{stages.map((item, index) => <button key={item.title} ref={el => { tabRefs.current[index] = el; }} id={`stage-tab-${index}`} type="button" role="tab" aria-selected={stage === index} aria-controls="stage-panel" tabIndex={stage === index ? 0 : -1} onKeyDown={event => handleTabs(event, index)} onClick={() => setStage(index)} className={stage === index ? styles.selectedTab : undefined}><span>0{index + 1}</span>{item.title}</button>)}</div>
+        <div className={styles.stageTabs} role="tablist" aria-label="Preparation stages">{stages.map((item, index) => <button key={item.title} ref={el => { tabRefs.current[index] = el; }} id={`stage-tab-${index}`} type="button" role="tab" aria-selected={stage === index} aria-controls="stage-panel" tabIndex={stage === index ? 0 : -1} onKeyDown={event => handleTabs(event, index)} onClick={() => setStage(index)} className={stage === index ? styles.selectedTab : undefined}>{item.title}</button>)}</div>
         <div id="stage-panel" role="tabpanel" aria-labelledby={`stage-tab-${stage}`} tabIndex={0} className={styles.stagePanel}><div className={styles.stageCopy}><span className={styles.stageIcon}><active.icon size={27} /></span><h3>{active.headline}</h3><p>{active.body}</p><span className={styles.stageNote}>{active.note}</span><a className={styles.textLink} href="/signup">Start your preparation</a></div><StagePreview stage={stage} /></div>
       </section>
       <section id="about" className={`${styles.container} ${styles.capabilities}`} aria-labelledby="capabilities-title"><div className={styles.capabilitiesIntro}><p className={styles.eyebrow}>THOUGHTFUL BY DESIGN</p><h2 id="capabilities-title">Your story has details.<br />Keep them connected.</h2><p>A workspace that makes room for the documents, decisions, and revisions behind your preparation.</p><a className={styles.secondaryButton} href="/workspace?sample=1">See it in the sample</a></div><div className={styles.capabilityRows}>
