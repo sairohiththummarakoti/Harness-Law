@@ -1,4 +1,4 @@
-import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export const cases=sqliteTable('cases',{
   ownerId:text('owner_id').primaryKey(),
@@ -66,6 +66,36 @@ export const authSessions=sqliteTable('auth_sessions',{
   fullName:text('full_name'),
   expiresAt:integer('expires_at').notNull(),
 },table=>[index('auth_sessions_expiry').on(table.expiresAt)]);
+
+export const passwordAccounts=sqliteTable('password_accounts',{
+  userId:text('user_id').primaryKey(),
+  name:text('name').notNull(),
+  email:text('email').notNull().unique(),
+  pendingEmail:text('pending_email'),
+  passwordHash:text('password_hash').notNull(),
+  verifiedAt:integer('verified_at'),
+  termsAcceptedAt:integer('terms_accepted_at').notNull(),
+  termsVersion:text('terms_version').notNull().default('unspecified'),
+  privacyVersion:text('privacy_version').notNull().default('unspecified'),
+  createdAt:integer('created_at').notNull(),
+},table=>[uniqueIndex('password_accounts_pending_email_unique').on(table.pendingEmail)]);
+export const emailChallenges=sqliteTable('email_challenges',{
+  tokenHash:text('token_hash').primaryKey(),
+  userId:text('user_id').notNull(),
+  purpose:text('purpose').notNull(),
+  expiresAt:integer('expires_at').notNull(),
+  createdAt:integer('created_at').notNull(),
+});
+export const passwordSessions=sqliteTable('password_sessions',{
+  tokenHash:text('token_hash').primaryKey(),
+  userId:text('user_id').notNull(),
+  expiresAt:integer('expires_at').notNull(),
+});
+export const authRateLimits=sqliteTable('auth_rate_limits',{
+  bucket:text('bucket').primaryKey(),
+  windowStartedAt:integer('window_started_at').notNull(),
+  attempts:integer('attempts').notNull(),
+});
 
 export const adminOwner=sqliteTable('admin_owner',{
   id:text('id').primaryKey(),

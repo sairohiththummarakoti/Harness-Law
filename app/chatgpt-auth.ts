@@ -19,7 +19,14 @@ const SIGN_OUT_PATH = "/signout-with-chatgpt";
 const CALLBACK_PATH = "/callback";
 
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
+  if (typeof process !== 'undefined' && process.env?.HARNESS_CHATGPT_AUTH_ENABLED === '0') {
+    return null;
+  }
   const requestHeaders = await headers();
+  const proxySecret = typeof process !== 'undefined' ? process.env?.HARNESS_CHATGPT_PROXY_SECRET : undefined;
+  if (proxySecret && requestHeaders.get('x-harness-chatgpt-proxy-secret') !== proxySecret) {
+    return null;
+  }
   const userId = requestHeaders.get(USER_ID_HEADER);
   const email = requestHeaders.get(USER_EMAIL_HEADER);
   if (!userId || !email) return null;

@@ -13,7 +13,7 @@ export interface AuthEnv { DB?: AuthDatabase; HARNESS_GOOGLE_CLIENT_ID?: unknown
 export interface AuthDependencies { repository?: AuthRepository; jwks?: JWTVerifyGetKey; now?: () => number; development?: boolean }
 
 export function getGoogleClientId(env: Pick<AuthEnv, 'HARNESS_GOOGLE_CLIENT_ID'>): string | null {
-  const value = env.HARNESS_GOOGLE_CLIENT_ID;
+  const value = env.HARNESS_GOOGLE_CLIENT_ID ?? (typeof process !== 'undefined' ? process.env?.HARNESS_GOOGLE_CLIENT_ID : undefined);
   return typeof value === 'string' && value.length <= 256 && /^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(value.trim()) ? value.trim() : null;
 }
 
@@ -37,7 +37,7 @@ export async function readGoogleUser(db: AuthDatabase, cookieHeader: string, sec
 export async function handleGoogleRequest(request: Request, env: AuthEnv, deps: AuthDependencies = {}): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'POST') return error('method_not_allowed', 'Use the sign-in form to continue.', 405);
   if (!isSameOrigin(request, request.method === 'GET')) return error('invalid_origin', 'Start sign-in from this app.', 403);
-  const secure = cookieSecurityForUrl(request.url, deps.development);
+  const secure = cookieSecurityForUrl(request.url, deps.development ?? (typeof process !== 'undefined' && process.env?.NODE_ENV === 'development'));
   if (secure === null) return error('https_required', 'A secure connection is required to sign in.', 403);
   const clientId = getGoogleClientId(env);
   if (!clientId) return error('google_unconfigured', 'Google sign-in is not configured yet. Continue with ChatGPT.', 503);
