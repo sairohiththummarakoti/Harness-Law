@@ -155,3 +155,10 @@ export const analyticsMeta=sqliteTable('analytics_meta',{
   key:text('key').primaryKey(),
   value:text('value').notNull(),
 });
+
+export const uscisSourceSnapshots=sqliteTable('uscis_source_snapshots',{
+  sourceId:text('source_id').primaryKey(),
+  snapshotJson:text('snapshot_json').notNull(),
+  checkedAt:integer('checked_at').notNull().default(0),
+  leaseUntil:integer('lease_until').notNull().default(0),
+});

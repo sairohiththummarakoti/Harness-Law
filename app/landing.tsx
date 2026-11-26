@@ -37,7 +37,7 @@ function ProductPreview() {
         <span className={styles.navCaption}>YOUR WORKSPACE</span>
         <div className={styles.mockNavActive}><LayoutDashboard size={16} /> Overview</div>
         <div className={styles.mockNav}><UserRound size={16} /> Your profile</div>
-        <div className={styles.mockNav}><ListChecks size={16} /> Your criteria</div>
+        <div className={styles.mockNav}><ListChecks size={16} /> EB-1A Guide</div>
         <div className={styles.mockNav}><FolderOpen size={16} /> Evidence library</div>
         <div className={styles.mockNav}><PencilLine size={16} /> Working draft</div>
         <div className={styles.sidebarFoot}><LockKeyhole size={16} /><span>Your story.<br />Your workspace.</span></div>

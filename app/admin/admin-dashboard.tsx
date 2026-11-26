@@ -24,7 +24,7 @@ function locationText(value: { country: string | null; region: string | null; ci
   return [...new Set([value.city, value.region, value.country ? countryName(value.country) : null].filter(Boolean))].join(", ") || "Unknown";
 }
 function pageName(value: string) {
-  const known: Record<string, string> = { "/": "Launch page", "/signin": "Sign in", "/signup": "Get started", "/onboarding": "Intake", "/workspace": "Workspace", "/privacy": "Privacy", "workspace/sample": "Fictional sample", "/workspace/sample": "Fictional sample", criterion: "Criterion details", dashboard: "Overview", profile: "Your profile", criteria: "Your criteria", evidence: "Evidence library", facts: "Facts & sources", composition: "Compose your case", draft: "Working draft", forms: "Application forms", review: "Final review", help: "Help & guidance", settings: "Settings" };
+  const known: Record<string, string> = { "/": "Launch page", "/signin": "Sign in", "/signup": "Get started", "/onboarding": "Intake", "/workspace": "Workspace", "/privacy": "Privacy", "workspace/sample": "Fictional sample", "/workspace/sample": "Fictional sample", criterion: "Criterion details", dashboard: "Overview", profile: "Your profile", criteria: "EB-1A Guide", evidence: "Evidence library", facts: "Facts & sources", composition: "Compose your case", draft: "Working draft", forms: "Application forms", review: "Final review", help: "Help & guidance", settings: "Settings" };
   return known[value] || (value.startsWith("/workspace/") ? known[value.slice(11)] || value : value.startsWith("workspace/") ? known[value.slice(10)] || value : value);
 }
 function providerName(provider: string) { return provider === "chatgpt" ? "ChatGPT" : provider === "google" ? "Google" : provider; }
