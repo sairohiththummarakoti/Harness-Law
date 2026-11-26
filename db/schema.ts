@@ -15,7 +15,22 @@ export const evidenceObjects=sqliteTable('evidence_objects',{
   objectKey:text('object_key').notNull(),
   metadataJson:text('metadata_json').notNull(),
   createdAt:text('created_at').notNull(),
+  deletedAt:text('deleted_at'),
 });
+
+export const evidenceDeletions=sqliteTable('evidence_deletions',{
+  id:text('id').primaryKey(),
+  ownerId:text('owner_id').notNull(),
+  caseId:text('case_id').notNull(),
+  targetKind:text('target_kind').notNull(),
+  targetId:text('target_id').notNull(),
+  expectedRevision:integer('expected_revision').notNull(),
+  objectKeysJson:text('object_keys_json').notNull(),
+  deletedFiles:integer('deleted_files').notNull(),
+  deletedFolders:integer('deleted_folders').notNull(),
+  createdAt:text('created_at').notNull(),
+  completedAt:text('completed_at'),
+},table=>[index('evidence_deletions_pending').on(table.ownerId,table.completedAt)]);
 
 export const integrationCases=sqliteTable('integration_cases',{
   caseId:text('case_id').primaryKey(),

@@ -1,5 +1,6 @@
 import type { CaseIntake } from './intake';
 import { folderIntegrityError, normalizeFolderName, type EvidenceFolder } from './evidence-folders.ts';
+import { evidenceDeletionSelection, type EvidenceDeleteTarget } from './evidence-deletion.ts';
 export type { EvidenceFolder } from './evidence-folders.ts';
 export type SupportStatus = 'unassessed' | 'supported' | 'needs_review' | 'conflicting' | 'evidence_missing';
 export type ReviewStatus = 'unreviewed' | 'applicant_reviewed' | 'attorney_reviewed';
@@ -71,6 +72,7 @@ export function createSampleCase():CaseState {
 }
 
 export type Action =
+ | {type:'delete_evidence';target:EvidenceDeleteTarget}
  | {type:'folder_create';folder:EvidenceFolder} | {type:'folder_rename';folderId:string;name:string} | {type:'folder_move';folderId:string;parentId:string|null} | {type:'folder_remove';folderId:string} | {type:'document_move';sourceId:string;folderId:string|null}
  | {type:'complete_upload';caseId:string;document:Evidence;replacementSourceId?:string|null}
  | {type:'profile';patch:Partial<Profile>} | {type:'professional';patch:Partial<Professional>} | {type:'consent';value:boolean} | {type:'navigate';page:string} | {type:'rename';name:string}
@@ -128,6 +130,16 @@ function bumpTarget(s:CaseState,target:string){
 export function applyAction(state:CaseState,action:Action):CaseState {
   const s=structuredClone(state);s.updatedAt=now();
   switch(action.type){
+    case 'delete_evidence':{
+      const {documents,folderIds}=evidenceDeletionSelection(s,action.target);
+      const sourceIds=new Set(documents.map(document=>document.id));
+      markStale(s,[...new Set(documents.flatMap(document=>sourceDependents(s,document.id)))]);
+      s.documents=s.documents.filter(document=>!sourceIds.has(document.id));
+      s.folders=(s.folders??[]).filter(folder=>!folderIds.has(folder.id));
+      s.facts=s.facts.filter(fact=>!sourceIds.has(fact.sourceId));
+      activity(s,'Evidence deleted',`${documents.length} file(s) and ${folderIds.size} folder(s) deleted. Dependent drafts require review.`);
+      break;
+    }
     case 'folder_create':{
       s.folders=[...(s.folders??[]),{...action.folder,name:normalizeFolderName(action.folder.name)}];
       const error=folderIntegrityError(s);if(error)throw new Error(error);

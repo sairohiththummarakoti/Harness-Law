@@ -37,7 +37,15 @@ const steps = [
 const questions = [
   {
     question: "Can I use the same file to fill different forms?",
-    answer: "Yes. Upload file saves your document privately to Evidence before reading it in your browser. Browse Evidence lets you reuse a saved file without uploading another copy. Review the proposed answers before applying them. Organize files into folders in Evidence; moving a file keeps its source identity and criterion associations. Local form reading does not mark a source as scanned or verified, and imported answers still need your review.",
+    answer: "Yes. Upload file saves your document privately to Evidence before reading it in your browser. Browse Evidence lets you select up to 20 saved files using checkboxes, even across folders. Use the selection count, Select all files here, or Clear selection to check your choices. Review the proposed answers before applying them; conflicting answers require your choice. Local form reading does not mark a source as scanned or verified.",
+  },
+  {
+    question: "Can I upload a whole folder?",
+    answer: "In Evidence, choose Upload, then Upload folder. Supported files keep their folder structure inside your current folder. Empty folders are not included by the browser. Unsupported, empty, or oversized files are skipped with a message; each file can be up to 20 MB. You can also create folders and move files without changing their source links.",
+  },
+  {
+    question: "How do I delete a file or folder?",
+    answer: "Open the three-dot menu beside the file or folder and choose Delete. Confirm the summary before continuing. Deleting a folder includes all its files and subfolders; deleting a file also deletes its stored versions. This cannot be undone, and dependent case sections need review. If private storage cleanup is temporarily unavailable, files become inaccessible immediately and cleanup retries when you reopen the workspace.",
   },
   {
     question: "How do I know my changes are saved?",

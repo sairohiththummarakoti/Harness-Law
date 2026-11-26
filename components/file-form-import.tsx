@@ -2,7 +2,8 @@
 
 import { useEffect, useId, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { Check, FileText, FolderOpen, Loader2, Upload, X } from "lucide-react";
-import { buildImportPatch, suggestImportFields, validateImportValue, type ImportField, type ImportSuggestion, type ImportValue } from "@/lib/form-import";
+import { buildImportPatch, validateImportValue, type ImportField, type ImportSuggestion, type ImportValue } from "@/lib/form-import";
+import { MAX_IMPORT_FILES, MAX_IMPORT_BATCH_CHARACTERS, evidenceSourceLabel, mergeImportSources, type ImportConflict, type ImportTextSource } from "@/lib/form-import-batch";
 import { extractImportFile } from "@/lib/form-import-extract";
 import { importFormat } from "@/lib/form-import-limits";
 import type { Evidence } from "@/lib/model";
@@ -12,7 +13,8 @@ import styles from "./file-form-import.module.css";
 
 type ImportValues = Record<string, unknown>;
 type ImportSource = { file?: File; document?: Evidence };
-type Review = { fileName: string; text: string; suggestions: ImportSuggestion[]; baseline: ImportValues; context: string; manualOnlyReason?: string };
+type Review = { fileName: string; text: string; suggestions: ImportSuggestion[]; conflicts: ImportConflict[]; baseline: ImportValues; context: string; manualOnlyReason?: string };
+type FileOutcome = { fileName: string; status: "waiting" | "reading" | "ready" | "failed"; message?: string };
 export type FileFormImportProps = {
   fields: ImportField[];
   values: ImportValues;
@@ -51,10 +53,11 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
   const generation = useRef(0);
   const latest = useRef({ fields, values, disabled: actionsDisabled, contextKey: activeContext, onApply, library });
   latest.current = { fields, values, disabled: actionsDisabled, contextKey: activeContext, onApply, library };
-  const lastSource = useRef<ImportSource | null>(null);
+  const lastSource = useRef<ImportSource[] | null>(null);
   const [review, setReview] = useState<Review | null>(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
+  const [outcomes, setOutcomes] = useState<FileOutcome[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -68,7 +71,7 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
     controller.current?.abort();
     controller.current = null;
     lastSource.current = null;
-    setBusy(false); setProgress(""); setReview(null); setError(""); setNotice("");
+    setBusy(false); setProgress(""); setOutcomes([]); setReview(null); setError(""); setNotice("");
     setAssignment(""); setSelectedText(""); setShowText(false); setDragging(false); setBrowseOpen(false); setConsentChecked(false); setConsentBusy(false);
     if (fileInput.current) fileInput.current.value = "";
     return () => { generation.current += 1; controller.current?.abort(); };
@@ -87,7 +90,7 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
   function cancel() {
     generation.current += 1;
     controller.current?.abort(); controller.current = null; lastSource.current = null;
-    setBusy(false); setProgress(""); setReview(null); setError("");
+    setBusy(false); setProgress(""); setOutcomes([]); setReview(null); setError("");
     setNotice("Import canceled. Your form answers have not changed. Any file already saved remains in Evidence.");
     setSelectedText(""); setAssignment("");
     if (fileInput.current) fileInput.current.value = "";
@@ -112,61 +115,80 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
     } finally { if (latest.current.contextKey === context) setConsentBusy(false); }
   }
 
-  async function choose(source: ImportSource) {
+  async function choose(sources: ImportSource[]) {
     const current = latest.current;
-    if (current.disabled || !current.library) return;
-    if (!source.document && (current.library.mode !== "personal" || !current.library.accountId)) {
+    if (current.disabled || !current.library || !sources.length) return;
+    if (sources.length > MAX_IMPORT_FILES) { setError(`Choose up to ${MAX_IMPORT_FILES} files at a time.`); return; }
+    const hasUploads = sources.some(source => !source.document);
+    if (hasUploads && (current.library.mode !== "personal" || !current.library.accountId)) {
       setError("Open a signed-in personal case to upload your files. You can browse fictional sample documents here."); return;
     }
-    if (!source.document && !current.library.consent) {
+    if (hasUploads && !current.library.consent) {
       setError("Save your storage consent below before uploading a file."); return;
     }
     controller.current?.abort();
     const request = ++generation.current;
     const context = current.contextKey;
     const abort = new AbortController(); controller.current = abort;
-    lastSource.current = source;
+    lastSource.current = sources;
     setBrowseOpen(false);
     setReview(null); setError(""); setNotice(""); setBusy(true);
-    setProgress(source.document ? "Opening your saved document…" : "Saving your file to Evidence…");
+    setProgress("Opening your documents…");
     setAssignment(""); setSelectedText(""); setShowText(false); setDragging(false);
+    const rows: FileOutcome[] = sources.map(source => ({ fileName: evidenceSourceLabel(source.document ?? { name: source.file?.name || "Document" }, current.library!.folders), status: "waiting" }));
+    setOutcomes([...rows]);
     const isCurrent = () => !abort.signal.aborted && request === generation.current && latest.current.contextKey === context;
+    const texts: ImportTextSource[] = [];
+    let textLength = 0;
     try {
-      let file = source.file;
-      if (!source.document) {
-        if (!file) throw new Error("Choose a document to upload.");
-        // Reject unsupported selections before storage; parsing happens only after retention.
-        importFormat(file.name, file.size);
-        source.document = await current.library.upload(file, abort.signal);
+      for (let index = 0; index < sources.length; index++) {
         if (!isCurrent()) return;
-      } else if (!file) {
-        file = await current.library.read(source.document, abort.signal);
-        if (!isCurrent()) return;
+        const source = sources[index];
+        const prefix = `${index + 1} of ${sources.length}: ${rows[index].fileName}`;
+        rows[index] = { ...rows[index], status: "reading" }; setOutcomes([...rows]);
+        try {
+          let file = source.file;
+          if (!source.document) {
+            if (!file) throw new Error("Choose a document to upload.");
+            // Reject unsupported selections before storage; parsing happens only after retention.
+            importFormat(file.name, file.size);
+            setProgress(`${prefix} — saving to Evidence…`);
+            source.document = await current.library.upload(file, abort.signal);
+            if (!isCurrent()) return;
+          } else if (!file) {
+            setProgress(`${prefix} — opening saved file…`);
+            file = await current.library.read(source.document, abort.signal);
+            if (!isCurrent()) return;
+          }
+          if (!file) throw new Error("The original file is unavailable. Choose another document.");
+          setProgress(`${prefix} — reading locally…`);
+          const result = await extractImportFile(file, { signal: abort.signal, onProgress: (message: string) => {
+            if (isCurrent()) setProgress(`${prefix} — ${message}`);
+          } });
+          if (!isCurrent()) return;
+          if (!result.text.trim()) throw new Error("No readable text found. Scans and images need OCR first.");
+          if (textLength + result.text.length > MAX_IMPORT_BATCH_CHARACTERS) throw new Error("This selection has too much text. Import this file in a separate batch.");
+          textLength += result.text.length;
+          texts.push({ fileName: rows[index].fileName, text: result.text, manualOnly: result.manualOnly, manualOnlyReason: result.manualOnlyReason });
+          rows[index] = { ...rows[index], status: "ready", message: result.manualOnly ? "Text ready for manual assignment" : "Ready to review" };
+        } catch (cause) {
+          if (!isCurrent()) return;
+          rows[index] = { ...rows[index], status: "failed", message: cause instanceof Error ? cause.message : "This document could not be read." };
+        }
+        setOutcomes([...rows]);
       }
-      if (!file) throw new Error("The original file is unavailable. Choose another document.");
       if (!isCurrent()) return;
-      setProgress("Reading your document locally…");
-      const result = await extractImportFile(file, { signal: abort.signal, onProgress: (message: string) => {
-        if (isCurrent()) setProgress(message);
-      } });
-      if (!isCurrent()) return;
-      if (!result.text.trim()) {
-        setError("No readable text was found. Try a document containing selectable text. Scans and images need OCR first.");
-        setNotice("Your file remains in Evidence. No form answers have changed.");
-        return;
-      }
+      const failedCount = rows.filter(row => row.status === "failed").length;
+      if (failedCount) setError(`${failedCount} ${failedCount === 1 ? "file could" : "files could"} not be read. Check each file’s result. Your saved files remain in Evidence.`);
+      if (!texts.length) { setNotice("No form answers have changed. Try another supported document."); return; }
       const latestValues = latest.current;
-      const suggestions = result.manualOnly ? [] : suggestImportFields(result.text, latestValues.fields, latestValues.values);
-      const manualOnlyReason = result.manualOnly ? result.manualOnlyReason || "This document needs manual field assignment." : undefined;
-      setReview({ fileName: source.document?.name || result.fileName, text: result.text, suggestions, baseline: structuredClone(latestValues.values), context, manualOnlyReason });
-      setShowText(suggestions.length === 0);
-      const stored = source.document?.sample ? "Fictional sample document. " : "Saved in Evidence. ";
-      setNotice(stored + (suggestions.length ? "Review each suggestion before filling this form." : manualOnlyReason ? "Read the document text and assign the relevant passages to fields below." : "No reliable field matches were found. Choose text and assign it to a field below."));
+      const { suggestions, conflicts } = mergeImportSources(texts, latestValues.fields, latestValues.values);
+      const manualOnlyReason = texts.filter(source => source.manualOnly).map(source => `${source.fileName}: ${source.manualOnlyReason || "Choose text and assign it to a field manually."}`).join(" ") || undefined;
+      const text = texts.map(source => texts.length > 1 ? `DOCUMENT: ${source.fileName}\n${source.text}` : source.text).join("\n\n────────────────────\n\n");
+      setReview({ fileName: texts.map(source => source.fileName).join(" · "), text, suggestions, conflicts, baseline: structuredClone(latestValues.values), context, manualOnlyReason });
+      setShowText(suggestions.length === 0 && conflicts.length === 0);
+      setNotice(`${texts.length} ${texts.length === 1 ? "document is" : "documents are"} ready. ` + (conflicts.length ? "Some files suggest different answers. Choose the correct source for those fields below." : suggestions.length ? "Review each suggestion before filling this form." : "No reliable matches were found. Choose text and assign it to a field below."));
       requestAnimationFrame(() => { if (isCurrent()) reviewHeading.current?.focus(); });
-    } catch (cause) {
-      if (!isCurrent()) return;
-      setError(cause instanceof Error ? cause.message : "We couldn’t read this document. Try another supported file.");
-      if (source.document && !source.document.sample) setNotice("Your file remains in Evidence. No form answers have changed.");
     } finally {
       if (request === generation.current) { controller.current = null; setBusy(false); setProgress(""); }
     }
@@ -175,7 +197,7 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
   function chooseInput(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = "";
-    if (file) void choose({ file });
+    if (file) void choose([{ file }]);
   }
 
   function drop(event: DragEvent<HTMLElement>) {
@@ -185,7 +207,7 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
       setError("Choose one document at a time."); return;
     }
     const file = event.dataTransfer.files[0];
-    if (file) void choose({ file });
+    if (file) void choose([{ file }]);
   }
 
   function updateSuggestion(key: string, value: ImportValue) {
@@ -215,9 +237,19 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
     if (!field || !activeReview || activeReview.suggestions.some(suggestion => suggestion.key === field.key)) return;
     const checked = selectedText ? validateImportValue(field, selectedText) : undefined;
     const value = checked?.value ?? (selectedText || emptyValue(field));
-    setReview(current => current && ({ ...current, suggestions: [...current.suggestions, { key: field.key, value, selected: false, excerpt: selectedText, error: checked?.error }] }));
+    setReview(current => current && ({ ...current, conflicts: current.conflicts.filter(conflict => conflict.key !== field.key), suggestions: [...current.suggestions, { key: field.key, value, selected: false, excerpt: selectedText, error: checked?.error }] }));
     setAssignment("");
     setNotice(`Added ${field.label}. Edit its proposed value and select it to fill this form.`);
+  }
+
+  function chooseConflict(conflict: ImportConflict, index: number) {
+    const candidate = conflict.candidates[index];
+    if (!candidate || actionsDisabled) return;
+    setReview(current => current && ({ ...current,
+      conflicts: current.conflicts.filter(item => item.key !== conflict.key),
+      suggestions: [...current.suggestions.filter(item => item.key !== conflict.key), { key: conflict.key, value: candidate.value, excerpt: `${candidate.fileName}\n${candidate.excerpt}`, error: candidate.error, selected: false }],
+    }));
+    setNotice(`Added the proposed ${conflict.label.toLowerCase()}. Review and check its field below before applying.`);
   }
 
   function apply() {
@@ -239,7 +271,7 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
     const count = Object.keys(result.patch).length;
     if (!count) { setNotice("Select at least one field to fill."); return; }
     current.onApply(result.patch);
-    setReview(null); lastSource.current = null; setSelectedText(""); setAssignment(""); setError("");
+    setReview(null); lastSource.current = null; setOutcomes([]); setSelectedText(""); setAssignment(""); setError("");
     setNotice(`Filled ${count} ${count === 1 ? "field" : "fields"} in this form. ${saveNote}`);
     returnFocus();
   }
@@ -284,7 +316,7 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
     onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }} onDrop={drop}>
     <div className={styles.intro}>
       <span className={styles.icon}><FileText size={21} aria-hidden="true" /></span>
-      <div className={styles.introText}><h3 ref={importHeading} id={`${id}-title`} tabIndex={-1}>{label}</h3><p>Upload a new document or reuse a file from your Evidence library.</p></div>
+      <div className={styles.introText}><h3 ref={importHeading} id={`${id}-title`} tabIndex={-1}>{label}</h3><p>Upload a new document or select saved files from your Evidence library.</p></div>
       <div className={styles.fileActions}>
         <button ref={chooseButton} type="button" className={styles.choose} disabled={actionsDisabled || busy || !canUpload || !library?.consent} onClick={() => fileInput.current?.click()}><Upload size={16} aria-hidden="true" />Upload file</button>
         <button ref={browseButton} type="button" className={styles.choose} disabled={actionsDisabled || busy || !library} aria-expanded={browseOpen} onClick={() => setBrowseOpen(value => !value)}><FolderOpen size={16} aria-hidden="true" />Browse Evidence</button>
@@ -300,14 +332,16 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
       <button type="button" className={styles.choose} disabled={!consentChecked || actionsDisabled || consentBusy} onClick={() => void saveConsent()}>{consentBusy && <Loader2 size={16} className={styles.spinner} aria-hidden="true" />}{consentBusy ? "Saving consent…" : "Save storage consent"}</button>
     </div>}
     {actionsDisabled && <p className={styles.fileHelp}>Wait for saving to finish or resolve the workspace message before continuing. Your document review stays here.</p>}
-    {browseOpen && library && <EvidencePicker documents={library.documents} folders={library.folders} disabled={actionsDisabled || busy} onChoose={document => void choose({ document })} onClose={closeBrowser} />}
+    {browseOpen && library && <EvidencePicker documents={library.documents} folders={library.folders} disabled={actionsDisabled || busy} onChoose={documents => void choose(documents.map(document => ({ document })))} onClose={closeBrowser} />}
     {busy && <div className={styles.progress} role="status"><Loader2 size={19} className={styles.spinner} aria-hidden="true" /><span>{progress || "Reading your document…"}</span><button type="button" className={styles.quiet} onClick={cancel}>Cancel import</button></div>}
-    {error && <div className={styles.error} role="alert"><p>{error}</p>{!busy && lastSource.current && !activeReview && <button type="button" className={styles.quiet} disabled={actionsDisabled} onClick={() => { if (lastSource.current) void choose(lastSource.current); }}>Retry this file</button>}</div>}
+    {outcomes.length > 0 && <ul className={styles.fileResults} aria-label="Document import results">{outcomes.map((outcome, index) => <li key={index} className={outcome.status === "failed" ? styles.failedFile : ""}><span>{outcome.status === "reading" ? <Loader2 size={15} className={styles.spinner} aria-hidden="true" /> : outcome.status === "ready" ? <Check size={15} aria-hidden="true" /> : <FileText size={15} aria-hidden="true" />}<strong>{outcome.fileName}</strong></span><small>{outcome.message || (outcome.status === "reading" ? "Reading…" : "Waiting")}</small></li>)}</ul>}
+    {error && <div className={styles.error} role="alert"><p>{error}</p>{!busy && lastSource.current && !activeReview && <button type="button" className={styles.quiet} disabled={actionsDisabled} onClick={() => { if (lastSource.current) void choose(lastSource.current); }}>Retry files</button>}</div>}
     <p className={`${styles.notice} ${notice ? "" : styles.srOnly}`} role="status" aria-live="polite">{notice}</p>
     {activeReview && <div className={styles.review}>
       <div className={styles.reviewHeader}><div><h4 ref={reviewHeading} tabIndex={-1}>Review before filling</h4><p>{activeReview.fileName}</p></div><button type="button" className={styles.close} onClick={cancel} aria-label="Cancel file import"><X size={18} aria-hidden="true" /></button></div>
       <p className={styles.instructions}>Only selected fields will change. Existing answers are unselected by default. Suggestions are applicant-entered information, not verified facts.</p>
-      {activeReview.manualOnlyReason && <p className={styles.manualNotice}>{activeReview.manualOnlyReason} Automatic suggestions are disabled for this document. Choose a passage and assign it to a field below.</p>}
+      {activeReview.manualOnlyReason && <p className={styles.manualNotice}>{activeReview.manualOnlyReason}</p>}
+      {activeReview.conflicts.length > 0 && <div className={styles.conflicts}><h5>Different answers found</h5><p>Choose the source you want to use, or assign the field yourself from the document text. These fields will stay unchanged until you review and select them.</p>{activeReview.conflicts.map(conflict => <div key={conflict.key} className={styles.conflict}><strong>{conflict.label}</strong>{conflict.candidates.map((candidate, index) => <div className={styles.candidate} key={index}><div><small>{candidate.fileName}</small><p>{displayValue(fields.find(field => field.key === conflict.key)!, candidate.value)}</p></div><button type="button" className={styles.choose} disabled={actionsDisabled} onClick={() => chooseConflict(conflict, index)}>Use this answer</button></div>)}</div>)}</div>}
       <details className={styles.extracted} open={showText} onToggle={event => setShowText(event.currentTarget.open)}>
         <summary>Read extracted text or assign a field yourself</summary>
         <label htmlFor={`${id}-text`}>Document text</label>

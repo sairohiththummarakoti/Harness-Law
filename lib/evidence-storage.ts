@@ -1,27 +1,44 @@
 import { matchesExpectedAccount } from './account-context.ts';
 import { applyAction, type CaseState, type Evidence } from './model.ts';
 import { caseSchema, evidenceSchema, MAX_CASE_BODY, MAX_FILE_BYTES, readLimitedBody, safeFilename, validUploadName } from './validation.ts';
+import { evidenceDeletionSelection, type EvidenceDeleteTarget } from './evidence-deletion.ts';
 
 export interface EvidenceObjectRow {
   id: string; ownerId: string; caseId: string; objectKey: string; createdAt: string;
+  deletedAt?: string | null;
   metadata: Evidence & { contentHash: string; uploadReplacementSourceId: string | null };
 }
 export interface EvidenceRepository {
   readCase(ownerId: string): Promise<CaseState | null>;
   readObject(ownerId: string, caseId: string, objectId: string): Promise<EvidenceObjectRow | null>;
   /** Atomically reserve the ID, returning the existing row when another retry won. */
-  registerObject(row: EvidenceObjectRow): Promise<EvidenceObjectRow>;
+  registerObject(row: EvidenceObjectRow, expectedRevision: number): Promise<EvidenceObjectRow | null>;
   saveCase(ownerId: string, caseId: string, expectedRevision: number, state: CaseState): Promise<boolean>;
 }
 export interface EvidenceBlobStore {
   /** Never overwrite an existing key; verify its size and contentHash on a retry. */
   putIfAbsent(key: string, bytes: ArrayBuffer, metadata: { owner: string; caseId: string; contentHash: string }): Promise<void>;
   get(key: string): Promise<{ body: ReadableStream<Uint8Array> | ArrayBuffer; size: number } | null>;
+  delete?(keys: string[]): Promise<void>;
+}
+export interface EvidenceDeletionJob {
+  id: string; ownerId: string; caseId: string; target: EvidenceDeleteTarget; expectedRevision: number;
+  objectKeys: string[]; deletedFiles: number; deletedFolders: number; createdAt: string; completedAt: string | null;
+}
+export interface EvidenceDeletionRepository {
+  readJob(ownerId: string, caseId: string, id: string): Promise<EvidenceDeletionJob | null>;
+  pendingJobs(ownerId: string): Promise<EvidenceDeletionJob[]>;
+  sourceObjects(ownerId: string, caseId: string, sourceIds: string[], objectIds: string[]): Promise<EvidenceObjectRow[]>;
+  /** One transaction: reserve job, compare-and-swap the case, and tombstone its objects. */
+  commit(job: EvidenceDeletionJob, sourceIds: string[], objectIds: string[], state: CaseState): Promise<boolean>;
+  complete(job: EvidenceDeletionJob): Promise<void>;
+  requeueObject(ownerId: string, caseId: string, objectKey: string): Promise<void>;
 }
 export interface EvidenceStorageDependencies {
   getUser(): Promise<{ userId: string } | null>;
   repository: EvidenceRepository;
   store?: EvidenceBlobStore;
+  deletions?: EvidenceDeletionRepository;
 }
 
 const MAX_MULTIPART_BYTES = MAX_FILE_BYTES + 65536;
@@ -71,6 +88,13 @@ function stringField(form: FormData, key: string, required = false): string | nu
   return form.get(key) as string;
 }
 
+async function cleanDeletedUpload(row: EvidenceObjectRow, deps: EvidenceStorageDependencies) {
+  // A writer can have passed its preflight before deletion committed. Reopen
+  // cleanup *after* that late write, so even a failed R2 delete stays retryable.
+  await deps.deletions?.requeueObject(row.ownerId, row.caseId, row.objectKey);
+  await deps.store?.delete?.([row.objectKey]);
+}
+
 export async function handleEvidenceUpload(request: Request, deps: EvidenceStorageDependencies): Promise<Response> {
   try {
     const user = await deps.getUser();
@@ -102,6 +126,7 @@ export async function handleEvidenceUpload(request: Request, deps: EvidenceStora
     if (!state.consent) return error('Save your processing consent before uploading documents.', 403, 'consent_required');
     const bytes = await file.arrayBuffer(), contentHash = await sha256(bytes), identity = await uploadIdentity(user.userId, caseId, uploadId);
     let row = await deps.repository.readObject(user.userId, caseId, identity.id);
+    if (row?.deletedAt) { await cleanDeletedUpload(row, deps); return error('This upload was deleted. Select the file again to create a new upload.', 410, 'file_deleted'); }
     if (row && !matchesUpload(row, name, file.size, contentHash, replacementSourceId)) return conflict('This upload attempt belongs to a different file. Choose the file again.', state, 'upload_id_conflict');
     if (row) {
       const attached = state.documents.find(document => !document.sample && document.objectId === row!.id);
@@ -121,7 +146,9 @@ export async function handleEvidenceUpload(request: Request, deps: EvidenceStora
     if (prepared.error) return prepared.error;
     // Reserving metadata before the deterministic key prevents concurrent retries
     // from overwriting bytes. Interrupted reservations remain safely retryable.
-    row = await deps.repository.registerObject({ id: identity.id, ownerId: user.userId, caseId, objectKey: identity.key, metadata: { ...document, contentHash, uploadReplacementSourceId: replacementSourceId }, createdAt: uploadedAt });
+    row = await deps.repository.registerObject({ id: identity.id, ownerId: user.userId, caseId, objectKey: identity.key, metadata: { ...document, contentHash, uploadReplacementSourceId: replacementSourceId }, createdAt: uploadedAt }, expectedRevision);
+    if (!row) return conflict('This case changed before the upload. Review the latest case and retry.', await deps.repository.readCase(user.userId));
+    if (row.deletedAt) { await cleanDeletedUpload(row, deps); return error('This upload was deleted. Select the file again to create a new upload.', 410, 'file_deleted'); }
     if (!matchesUpload(row, name, file.size, contentHash, replacementSourceId)) return conflict('This upload attempt belongs to a different file. Choose the file again.', await deps.repository.readCase(user.userId), 'upload_id_conflict');
     state = await deps.repository.readCase(user.userId);
     const beforeWriteGuard = caseGuard(state, caseId);
@@ -131,6 +158,11 @@ export async function handleEvidenceUpload(request: Request, deps: EvidenceStora
     if (state.revision !== expectedRevision) return conflict('This case changed before the upload. Review the latest case and retry.', state);
     if (!state.consent) return error('Save your processing consent before uploading documents.', 403, 'consent_required');
     await deps.store.putIfAbsent(row.objectKey, bytes, { owner: identity.owner, caseId, contentHash });
+    // A deletion can win while R2 is writing. Never leave bytes recreated by that late write.
+    if ((await deps.repository.readObject(user.userId, caseId, row.id))?.deletedAt) {
+      await cleanDeletedUpload(row, deps);
+      return error('This upload was deleted.', 410, 'file_deleted');
+    }
     state = await deps.repository.readCase(user.userId);
     const afterWriteGuard = caseGuard(state, caseId);
     if (afterWriteGuard || !state) return afterWriteGuard!;
@@ -144,6 +176,10 @@ export async function handleEvidenceUpload(request: Request, deps: EvidenceStora
     const final = attachment(state, rawDocument, replacementSourceId);
     if (final.error || !final.state) return final.error!;
     if (!await deps.repository.saveCase(user.userId, caseId, expectedRevision, final.state)) {
+      if ((await deps.repository.readObject(user.userId, caseId, row.id))?.deletedAt) {
+        await cleanDeletedUpload(row, deps);
+        return error('This upload was deleted.', 410, 'file_deleted');
+      }
       const latest = await deps.repository.readCase(user.userId);
       const concurrentAttachment = latest?.id === caseId && latest.documents.find(item => !item.sample && item.objectId === row!.id);
       if (concurrentAttachment) return json({ document: { ...rawDocument, folderId: concurrentAttachment.folderId ?? null }, state: latest, revision: latest!.revision });
@@ -170,7 +206,7 @@ export async function handleEvidenceRead(request: Request, deps: EvidenceStorage
     if (!state || state.id !== caseId) return conflict('The active case changed. Reload before opening files.', state, 'case_changed');
     if (state.mode !== 'personal' || !state.documents.some(document => !document.sample && document.objectId === objectId)) return error('This file is not available in the current case.', 404, 'file_not_found');
     const row = await deps.repository.readObject(user.userId, caseId, objectId);
-    if (!row) return error('This file is not available in the current case.', 404, 'file_not_found');
+    if (!row || row.deletedAt) return error('This file is not available in the current case.', 404, 'file_not_found');
     const document = publicDocument(row);
     if (!deps.store) return error('Evidence storage is not configured.', 503, 'storage_unavailable');
     const object = await deps.store.get(row.objectKey);
@@ -186,4 +222,68 @@ export async function handleEvidenceRead(request: Request, deps: EvidenceStorage
       'Cross-Origin-Resource-Policy': 'same-origin',
     } });
   } catch { return error('The stored file could not be opened. Please retry.', 503, 'file_unavailable'); }
+}
+
+async function cleanDeletion(job: EvidenceDeletionJob, deps: EvidenceStorageDependencies): Promise<boolean> {
+  if (job.completedAt) return true;
+  if (!deps.deletions || !deps.store?.delete) return false;
+  try {
+    // R2 deletion is idempotent, including a retry after a response or DB write was lost.
+    for (let offset = 0; offset < job.objectKeys.length; offset += 500) await deps.store.delete(job.objectKeys.slice(offset, offset + 500));
+    await deps.deletions.complete(job);
+    return true;
+  } catch { return false; }
+}
+
+/** Resume durable cleanup on ordinary workspace loads; no user files become readable again. */
+export async function resumeEvidenceDeletions(ownerId: string, deps: EvidenceStorageDependencies): Promise<void> {
+  if (!deps.deletions || !deps.store?.delete) return;
+  try { for (const job of (await deps.deletions.pendingJobs(ownerId)).slice(0, 5)) await cleanDeletion(job, deps); }
+  catch { /* A failed retry stays queued. It must not prevent opening the workspace. */ }
+}
+
+export async function handleEvidenceDelete(request: Request, deps: EvidenceStorageDependencies): Promise<Response> {
+  try {
+    const user = await deps.getUser();
+    if (!user) return error('Sign in to delete evidence.', 401, 'session_expired');
+    if (!matchesExpectedAccount(request, user.userId)) return error('Your session changed. Sign in to the account used in this tab before continuing.', 401, 'session_changed');
+    if (request.headers.get('origin') !== new URL(request.url).origin) return error('This deletion request did not originate from this app.', 403, 'invalid_origin');
+    if (request.headers.get('content-type')?.split(';', 1)[0].trim() !== 'application/json') return error('Send a deletion request as JSON.', 415, 'invalid_content_type');
+    const bytes = await readLimitedBody(request, 4096);
+    if (!bytes) return error('The deletion request is too large.', 413, 'invalid_delete');
+    let body: { caseId?: unknown; expectedRevision?: unknown; deletionId?: unknown; target?: { kind?: unknown; id?: unknown } };
+    try { body = JSON.parse(new TextDecoder().decode(bytes)); } catch { return error('The deletion request is invalid.', 400, 'invalid_delete'); }
+    if (!body || typeof body !== 'object' || typeof body.caseId !== 'string' || !body.caseId || body.caseId.length > 150 || !Number.isSafeInteger(body.expectedRevision) || Number(body.expectedRevision) < 0 || Number(body.expectedRevision) > 2147483646 || typeof body.deletionId !== 'string' || !UUID.test(body.deletionId) || !body.target || !['file', 'folder'].includes(String(body.target.kind)) || typeof body.target.id !== 'string' || !body.target.id || body.target.id.length > 150) return error('Reload your case and select the item again.', 400, 'invalid_delete');
+    if (!deps.deletions || !deps.store?.delete) return error('Evidence deletion is temporarily unavailable.', 503, 'storage_unavailable');
+    await resumeEvidenceDeletions(user.userId, deps);
+    const caseId = body.caseId, expectedRevision = Number(body.expectedRevision), target = body.target as EvidenceDeleteTarget;
+    const jobId = await sha256(new TextEncoder().encode(JSON.stringify([user.userId, caseId, body.deletionId.toLowerCase()])).buffer as ArrayBuffer);
+    let state = await deps.repository.readCase(user.userId);
+    const guard = caseGuard(state, caseId); if (guard || !state) return guard!;
+    let job = await deps.deletions.readJob(user.userId, caseId, jobId);
+    if (job && (job.target.kind !== target.kind || job.target.id !== target.id)) return error('This deletion request belongs to another item.', 409, 'delete_id_conflict');
+    if (!job) {
+      if (state.revision !== expectedRevision) return conflict('This case changed before deletion. Review the latest case and try again.', state);
+      let selected: ReturnType<typeof evidenceDeletionSelection>;
+      try { selected = evidenceDeletionSelection(state, target); } catch { return error('This file or folder no longer exists.', 404, 'item_not_found'); }
+      const objects = await deps.deletions.sourceObjects(user.userId, caseId, selected.documents.map(document => document.id), selected.documents.flatMap(document => document.objectId ? [document.objectId] : []));
+      if (selected.documents.some(document => document.sample || !document.objectId || !objects.some(row => row.id === document.objectId && !row.deletedAt))) return error('A file could not be verified as belonging to this case. Reload before deleting.', 422, 'invalid_evidence');
+      const next = applyAction(state, { type: 'delete_evidence', target }); next.revision = state.revision + 1;
+      if (!caseSchema.safeParse(next).success) return error('This case could not be updated safely.', 422, 'invalid_state');
+      job = { id: jobId, ownerId: user.userId, caseId, target, expectedRevision, objectKeys: [...new Set(objects.map(row => row.objectKey))], deletedFiles: selected.documents.length, deletedFolders: selected.folderIds.size, createdAt: new Date().toISOString(), completedAt: null };
+      if (!await deps.deletions.commit(job, selected.documents.map(document => document.id), objects.map(row => row.id), next)) {
+        const existing = await deps.deletions.readJob(user.userId, caseId, jobId);
+        if (existing && existing.target.kind === target.kind && existing.target.id === target.id) job = existing;
+        else return conflict('This case changed before deletion. Review the latest case and try again.', await deps.repository.readCase(user.userId));
+      }
+      // The transaction may include replacement uploads registered after the
+      // earlier ownership check. Cleanup must use its authoritative key list.
+      job = await deps.deletions.readJob(user.userId, caseId, jobId);
+      if (!job) return error('Deletion status could not be read. Retry the same item.', 503, 'delete_failed');
+    }
+    const cleanupPending = !await cleanDeletion(job, deps);
+    state = await deps.repository.readCase(user.userId);
+    if (!state || state.id !== caseId) return conflict('The active case changed. Reload before continuing.', state, 'case_changed');
+    return json({ state, revision: state.revision, deletedFiles: job.deletedFiles, deletedFolders: job.deletedFolders, cleanupPending });
+  } catch { return error('Deletion could not be completed. Retry the same item to check its status.', 503, 'delete_failed'); }
 }

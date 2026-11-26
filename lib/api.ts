@@ -28,7 +28,7 @@ export async function validateEvidenceOwnership(ownerId:string,state:CaseState):
       continue;
     }
     if(!doc.objectId)return 'Uploaded evidence must have a registered object identity.';
-    const row=await database().prepare('SELECT metadata_json FROM evidence_objects WHERE id = ? AND owner_id = ? AND case_id = ?').bind(doc.objectId,ownerId,state.id).first<{metadata_json:string}>();
+    const row=await database().prepare('SELECT metadata_json FROM evidence_objects WHERE id = ? AND owner_id = ? AND case_id = ? AND deleted_at IS NULL').bind(doc.objectId,ownerId,state.id).first<{metadata_json:string}>();
     if(!row)return 'An evidence object does not belong to this case.';
     const saved=JSON.parse(row.metadata_json) as Evidence;
     const keys=(['name','status','language','pages','bytes','kind','excerpt','uploadedAt','sample','objectId','issue'] as const);

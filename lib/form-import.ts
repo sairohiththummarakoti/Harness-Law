@@ -11,6 +11,7 @@ export interface ImportField {
   maxItems?: number;
 }
 export interface ImportSuggestion { key: string; value: ImportValue; excerpt: string; selected: boolean; error?: string }
+export interface ImportAmbiguity { key: string; candidates: ImportSuggestion[] }
 const forbidden = new Set(['__proto__', 'prototype', 'constructor', 'accountEmail', 'accountId', 'userId', 'password', 'consent', 'confirmed', 'reviewed', 'reviewStatus', 'supportStatus', 'citations', 'associations', 'locked', 'templateStatus']);
 const canonical = (value: string) => value.replace(/([a-z])([A-Z])/g, '$1 $2').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const knownFieldLabels = new Set(ALL_IMPORT_FIELD_LABELS.map(canonical));
@@ -59,8 +60,8 @@ export function validateImportValue(field: ImportField, input: unknown): { value
 }
 
 /** Only exact, labeled answers/section titles are matched. No legal conclusions are inferred. */
-export function suggestImportFields(text: string, fields: ImportField[], current: Record<string, unknown>, options: { manualOnly?: boolean } = {}): ImportSuggestion[] {
-  if (options.manualOnly) return [];
+export function analyzeImportFields(text: string, fields: ImportField[], current: Record<string, unknown>, options: { manualOnly?: boolean } = {}): { suggestions: ImportSuggestion[]; ambiguities: ImportAmbiguity[] } {
+  if (options.manualOnly) return { suggestions: [], ambiguities: [] };
   const available = safeFields(fields);
   const aliases = new Map<string, ImportField>();
   for (const field of available) for (const alias of [field.key, field.label, ...(field.aliases ?? [])]) aliases.set(canonical(alias), field);
@@ -143,16 +144,29 @@ export function suggestImportFields(text: string, fields: ImportField[], current
       }
     }
   }
-  return available.flatMap(field => {
+  const ambiguities: ImportAmbiguity[] = [];
+  const suggestions: ImportSuggestion[] = available.flatMap(field => {
     const entries = candidates.get(field.key);
     if (!entries?.length) return [];
-    // Contradictory repeated answers are left for explicit manual assignment.
-    if (entries.some(entry => entry.value !== entries[0].value)) return [];
+    // Preserve contradictory answers so another file cannot silently resolve them.
+    if (entries.some(entry => entry.value !== entries[0].value)) {
+      ambiguities.push({ key: field.key, candidates: entries.map(entry => {
+        const checked = validateImportValue(field, entry.value);
+        return { key: field.key, value: checked.value ?? entry.value, excerpt: entry.excerpt, selected: false, ...(checked.error ? { error: checked.error } : {}) };
+      }) });
+      return [];
+    }
     if (['null', 'undefined', 'n a', 'not provided', 'not specified'].includes(canonical(entries[0].value))) return [];
     const checked = validateImportValue(field, entries[0].value);
     return [{ key: field.key, value: checked.value ?? entries[0].value, excerpt: entries[0].excerpt,
       selected: !checked.error && !uncertainHeader.has(field.key) && isEmptyImportValue(current[field.key]), ...(checked.error ? { error: checked.error } : {}) }];
   });
+  return { suggestions, ambiguities };
+}
+
+/** Single-document callers retain the conservative behavior of omitting ambiguous fields. */
+export function suggestImportFields(text: string, fields: ImportField[], current: Record<string, unknown>, options: { manualOnly?: boolean } = {}): ImportSuggestion[] {
+  return analyzeImportFields(text, fields, current, options).suggestions;
 }
 
 /** Whitelists current-form fields and validates the complete selection atomically. */

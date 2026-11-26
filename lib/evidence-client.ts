@@ -1,7 +1,23 @@
 import type { CaseState, Evidence } from './model';
+import type { EvidenceDeleteTarget } from './evidence-deletion';
 
 export class EvidenceRequestError extends Error {
   constructor(message: string, public status: number, public state?: CaseState, public revision?: number) { super(message); }
+}
+
+const deletionIds = new Map<string, string>();
+export async function deleteEvidenceItem(target: EvidenceDeleteTarget, accountId: string, state: CaseState, deletionId?: string): Promise<{ state: CaseState; revision: number; deletedFiles: number; deletedFolders: number; cleanupPending: boolean }> {
+  const scope = JSON.stringify([accountId, state.id, target.kind, target.id]);
+  const requestId = deletionId ?? deletionIds.get(scope) ?? crypto.randomUUID();
+  deletionIds.set(scope, requestId);
+  const response = await fetch('/api/evidence', {
+    method: 'DELETE', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Harness-Account': accountId },
+    body: JSON.stringify({ caseId: state.id, expectedRevision: state.revision, target, deletionId: requestId }), signal: AbortSignal.timeout(90000),
+  });
+  let data: { error?: string; state?: CaseState; revision?: number; deletedFiles?: number; deletedFolders?: number; cleanupPending?: boolean } = {};
+  try { data = await response.json(); } catch { /* Preserve the original HTTP status. */ }
+  if (!response.ok || !data.state || data.revision === undefined) throw new EvidenceRequestError(data.error || (response.status === 401 ? 'Your session changed or expired. Sign in to the same account again.' : 'Deletion could not be completed. Retry to check its status.'), response.status, data.state, data.revision);
+  return { state: data.state, revision: data.revision, deletedFiles: data.deletedFiles ?? 0, deletedFolders: data.deletedFolders ?? 0, cleanupPending: data.cleanupPending === true };
 }
 
 const uploadIds = new WeakMap<File, Map<string, string>>();
