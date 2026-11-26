@@ -3,12 +3,14 @@ import { getAppUser } from '@/app/auth';
 import { database, initialCase, json, parseCase, readCase, sameOrigin, validateEvidenceOwnership } from '@/lib/api';
 import { MAX_CASE_BODY, readLimitedBody, saveSchema } from '@/lib/validation';
 import type { CaseState } from '@/lib/model';
+import { resumeEvidenceDeletions } from '@/lib/evidence-storage';
+import { evidenceStorageDependencies } from '@/lib/evidence-repository';
 export const dynamic='force-dynamic';
 
 export async function GET(request:Request){
   const user=await getAppUser();if(!user)return json({error:'Sign in to open your saved case.',code:'session_expired'},401);
   if(!matchesExpectedAccount(request,user.userId))return json({error:"Your session changed. Sign in to the account used in this tab before continuing.",code:"session_changed"},401);
-  try{const row=await readCase(user.userId);const state=row?parseCase(row):await initialCase(user.userId);return json({state,revision:state.revision});}
+  try{await resumeEvidenceDeletions(user.userId,evidenceStorageDependencies());const row=await readCase(user.userId);const state=row?parseCase(row):await initialCase(user.userId);return json({state,revision:state.revision});}
   catch{return json({error:'Case storage is temporarily unavailable. Your unsaved changes have not been marked saved.',code:'storage_unavailable'},503);}
 }
 export async function PUT(request:Request){

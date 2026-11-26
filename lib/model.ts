@@ -1,4 +1,7 @@
 import type { CaseIntake } from './intake';
+import { folderIntegrityError, normalizeFolderName, type EvidenceFolder } from './evidence-folders.ts';
+import { evidenceDeletionSelection, type EvidenceDeleteTarget } from './evidence-deletion.ts';
+export type { EvidenceFolder } from './evidence-folders.ts';
 export type SupportStatus = 'unassessed' | 'supported' | 'needs_review' | 'conflicting' | 'evidence_missing';
 export type ReviewStatus = 'unreviewed' | 'applicant_reviewed' | 'attorney_reviewed';
 export type AssociationStatus = 'proposed' | 'confirmed' | 'removed';
@@ -7,7 +10,7 @@ export interface Professional { field:string; role:string; organization:string; 
 export interface Forms { fullName:string; address:string; country:string; intendedWork:string; reviewed:boolean; templateStatus:'unverified'|'current' }
 export interface Association { criterion:string; status:AssociationStatus; actor:string; revision:number }
 export interface EvidenceVersion { version:number; name:string; excerpt:string; status:Evidence['status']; at:string }
-export interface Evidence { id:string; name:string; version:number; status:'ready'|'needs_attention'|'rejected'; language:string; pages:number; bytes:number; kind:string; excerpt:string; associations:Association[]; exhibit:string; uploadedAt:string; sample:boolean; objectId?:string; issue?:string; previousVersions?:EvidenceVersion[] }
+export interface Evidence { id:string; name:string; version:number; status:'ready'|'needs_attention'|'rejected'; language:string; pages:number; bytes:number; kind:string; excerpt:string; associations:Association[]; exhibit:string; uploadedAt:string; sample:boolean; objectId?:string; issue?:string; previousVersions?:EvidenceVersion[]; folderId?:string|null }
 export interface Fact { id:string; label:string; value:string; originalValue:string; sourceId:string; page:number; status:'unresolved'|'confirmed'|'corrected'|'issue'; reason:string }
 export interface Citation { sourceId:string; sourceVersion:number; page:number; quote:string }
 export interface Claim { id:string; text:string; citations:Citation[]; supportStatus:SupportStatus; reviewStatus:ReviewStatus; locked:boolean; revision:number; history:{text:string;revision:number;author:string;at:string;supportStatus?:SupportStatus;reviewStatus?:ReviewStatus}[] }
@@ -17,7 +20,7 @@ export interface Composition { id:string; version:number; selected:{criterion:st
 export interface Activity { id:string;title:string;detail:string;at:string }
 export type OnboardingGoal = 'evidence' | 'narrative' | 'review';
 export interface Onboarding { version:1;step:1|2|3|4;goal?:OnboardingGoal;completedAt?:string }
-export interface CaseState { id:string;name:string;mode:'sample'|'personal';revision:number;profile:Profile;professional:Professional;criteria:string[];documents:Evidence[];facts:Fact[];runs:Record<string,CriterionRun>;composition:Composition|null;compositionHistory?:Composition[];forms:Forms;activities:Activity[];consent:boolean;lastPage:string;updatedAt:string;onboarding?:Onboarding;intake?:CaseIntake }
+export interface CaseState { id:string;name:string;mode:'sample'|'personal';revision:number;profile:Profile;professional:Professional;criteria:string[];documents:Evidence[];folders?:EvidenceFolder[];facts:Fact[];runs:Record<string,CriterionRun>;composition:Composition|null;compositionHistory?:Composition[];forms:Forms;activities:Activity[];consent:boolean;lastPage:string;updatedAt:string;onboarding?:Onboarding;intake?:CaseIntake }
 export interface Blocker { id:string;title:string;detail:string;page:string }
 export const GUIDANCE_URL='https://www.uscis.gov/policy-manual/volume-6-part-f-chapter-2';
 export const CRITERIA = [
@@ -69,6 +72,8 @@ export function createSampleCase():CaseState {
 }
 
 export type Action =
+ | {type:'delete_evidence';target:EvidenceDeleteTarget}
+ | {type:'folder_create';folder:EvidenceFolder} | {type:'folder_rename';folderId:string;name:string} | {type:'folder_move';folderId:string;parentId:string|null} | {type:'folder_remove';folderId:string} | {type:'document_move';sourceId:string;folderId:string|null}
  | {type:'complete_upload';caseId:string;document:Evidence;replacementSourceId?:string|null}
  | {type:'profile';patch:Partial<Profile>} | {type:'professional';patch:Partial<Professional>} | {type:'consent';value:boolean} | {type:'navigate';page:string} | {type:'rename';name:string}
  | {type:'toggle_criterion';criterion:string} | {type:'association';sourceId:string;criterion:string;status:AssociationStatus} | {type:'add_document';document:Evidence} | {type:'replace_document';sourceId:string;document:Evidence} | {type:'remove_document';sourceId:string}
@@ -125,6 +130,44 @@ function bumpTarget(s:CaseState,target:string){
 export function applyAction(state:CaseState,action:Action):CaseState {
   const s=structuredClone(state);s.updatedAt=now();
   switch(action.type){
+    case 'delete_evidence':{
+      const {documents,folderIds}=evidenceDeletionSelection(s,action.target);
+      const sourceIds=new Set(documents.map(document=>document.id));
+      markStale(s,[...new Set(documents.flatMap(document=>sourceDependents(s,document.id)))]);
+      s.documents=s.documents.filter(document=>!sourceIds.has(document.id));
+      s.folders=(s.folders??[]).filter(folder=>!folderIds.has(folder.id));
+      s.facts=s.facts.filter(fact=>!sourceIds.has(fact.sourceId));
+      activity(s,'Evidence deleted',`${documents.length} file(s) and ${folderIds.size} folder(s) deleted. Dependent drafts require review.`);
+      break;
+    }
+    case 'folder_create':{
+      s.folders=[...(s.folders??[]),{...action.folder,name:normalizeFolderName(action.folder.name)}];
+      const error=folderIntegrityError(s);if(error)throw new Error(error);
+      activity(s,'Folder created',normalizeFolderName(action.folder.name));break;
+    }
+    case 'folder_rename':{
+      const folder=s.folders?.find(item=>item.id===action.folderId);if(!folder)throw new Error('This folder no longer exists.');
+      folder.name=normalizeFolderName(action.name);
+      const error=folderIntegrityError(s);if(error)throw new Error(error);
+      activity(s,'Folder renamed',folder.name);break;
+    }
+    case 'folder_move':{
+      const folder=s.folders?.find(item=>item.id===action.folderId);if(!folder)throw new Error('This folder no longer exists.');
+      folder.parentId=action.parentId;
+      const error=folderIntegrityError(s);if(error)throw new Error(error);
+      activity(s,'Folder moved',folder.name);break;
+    }
+    case 'folder_remove':{
+      const folder=s.folders?.find(item=>item.id===action.folderId);if(!folder)throw new Error('This folder no longer exists.');
+      if(s.folders?.some(item=>item.parentId===folder.id)||s.documents.some(document=>document.folderId===folder.id))throw new Error('Move the files and subfolders out before removing this folder.');
+      s.folders=s.folders!.filter(item=>item.id!==folder.id);activity(s,'Empty folder removed',folder.name);break;
+    }
+    case 'document_move':{
+      const document=s.documents.find(item=>item.id===action.sourceId);if(!document)throw new Error('This file no longer exists.');
+      document.folderId=action.folderId;
+      const error=folderIntegrityError(s);if(error)throw new Error(error);
+      activity(s,'Document moved',document.name);break;
+    }
     case 'complete_upload':{
       if(s.id!==action.caseId||s.mode!=='personal'||action.document.sample)break;
       return applyAction(s,action.replacementSourceId?{type:'replace_document',sourceId:action.replacementSourceId,document:action.document}:{type:'add_document',document:action.document});
@@ -152,12 +195,12 @@ export function applyAction(state:CaseState,action:Action):CaseState {
       d.associations.push({criterion:action.criterion,status:action.status,actor:s.profile.fullName||'Applicant',revision:(old?.revision||0)+1});
       markStale(s,[action.criterion]);activity(s,'Evidence association updated',`${d.name} · ${action.criterion} · ${action.status}`);break;
     }
-    case 'add_document':if(!s.documents.some(d=>d.id===action.document.id)&&!(s.mode==='personal'&&action.document.sample)){s.documents.unshift(action.document);activity(s,'Document added',action.document.name);}break;
+    case 'add_document':if(!s.documents.some(d=>d.id===action.document.id)&&!(s.mode==='personal'&&action.document.sample)){s.documents.unshift(action.document);const error=folderIntegrityError(s);if(error)throw new Error(error);activity(s,'Document added',action.document.name);}break;
     case 'replace_document':{
       const i=s.documents.findIndex(d=>d.id===action.sourceId);if(i<0)break;const old=s.documents[i];
       if(s.mode==='personal'&&action.document.sample)break;
       markStale(s,sourceDependents(s,old.id));
-      s.documents[i]={...action.document,id:old.id,version:old.version+1,associations:old.associations.map(a=>({...a,status:a.status==='removed'?'removed':'proposed',revision:a.revision+1})),exhibit:old.exhibit,previousVersions:[...(old.previousVersions||[]),{version:old.version,name:old.name,excerpt:old.excerpt,status:old.status,at:now()}]};
+      s.documents[i]={...action.document,id:old.id,version:old.version+1,folderId:action.document.folderId===undefined?old.folderId:action.document.folderId,associations:old.associations.map(a=>({...a,status:a.status==='removed'?'removed':'proposed',revision:a.revision+1})),exhibit:old.exhibit,previousVersions:[...(old.previousVersions||[]),{version:old.version,name:old.name,excerpt:old.excerpt,status:old.status,at:now()}]};
       activity(s,'Source version replaced',`${old.name} · v${old.version+1}. Confirm associations for the new version.`);break;
     }
     case 'remove_document':markStale(s,sourceDependents(s,action.sourceId));s.documents=s.documents.filter(d=>d.id!==action.sourceId);activity(s,'Source removed from the case','Dependent results require source repair.');break;

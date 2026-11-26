@@ -8,6 +8,12 @@ export const cases=sqliteTable('cases',{
   updatedAt:text('updated_at').notNull(),
 });
 
+export const accountIntakeEntries=sqliteTable('account_intake_entries',{
+  ownerId:text('owner_id').primaryKey(),
+  firstSeenAt:text('first_seen_at').notNull(),
+  firstShownAt:text('first_shown_at'),
+});
+
 export const evidenceObjects=sqliteTable('evidence_objects',{
   id:text('id').primaryKey(),
   ownerId:text('owner_id').notNull(),
@@ -15,7 +21,22 @@ export const evidenceObjects=sqliteTable('evidence_objects',{
   objectKey:text('object_key').notNull(),
   metadataJson:text('metadata_json').notNull(),
   createdAt:text('created_at').notNull(),
+  deletedAt:text('deleted_at'),
 });
+
+export const evidenceDeletions=sqliteTable('evidence_deletions',{
+  id:text('id').primaryKey(),
+  ownerId:text('owner_id').notNull(),
+  caseId:text('case_id').notNull(),
+  targetKind:text('target_kind').notNull(),
+  targetId:text('target_id').notNull(),
+  expectedRevision:integer('expected_revision').notNull(),
+  objectKeysJson:text('object_keys_json').notNull(),
+  deletedFiles:integer('deleted_files').notNull(),
+  deletedFolders:integer('deleted_folders').notNull(),
+  createdAt:text('created_at').notNull(),
+  completedAt:text('completed_at'),
+},table=>[index('evidence_deletions_pending').on(table.ownerId,table.completedAt)]);
 
 export const integrationCases=sqliteTable('integration_cases',{
   caseId:text('case_id').primaryKey(),
@@ -74,4 +95,63 @@ export const authRateLimits=sqliteTable('auth_rate_limits',{
   bucket:text('bucket').primaryKey(),
   windowStartedAt:integer('window_started_at').notNull(),
   attempts:integer('attempts').notNull(),
+});
+
+export const adminOwner=sqliteTable('admin_owner',{
+  id:text('id').primaryKey(),
+  userId:text('user_id').notNull(),
+  provider:text('provider').notNull(),
+  email:text('email').notNull(),
+  displayName:text('display_name').notNull(),
+  createdAt:integer('created_at').notNull(),
+});
+
+export const adminMembers=sqliteTable('admin_members',{
+  userId:text('user_id').primaryKey(),
+  provider:text('provider').notNull(),
+  email:text('email').notNull(),
+  displayName:text('display_name').notNull(),
+  createdAt:integer('created_at').notNull(),
+  createdBy:text('created_by').notNull(),
+});
+
+export const adminAudit=sqliteTable('admin_audit',{
+  id:text('id').primaryKey(),
+  action:text('action').notNull(),
+  actorId:text('actor_id').notNull(),
+  actorEmail:text('actor_email').notNull(),
+  targetId:text('target_id').notNull(),
+  targetEmail:text('target_email').notNull(),
+  createdAt:integer('created_at').notNull(),
+},table=>[index('admin_audit_created').on(table.createdAt)]);
+
+export const analyticsUsers=sqliteTable('analytics_users',{
+  userId:text('user_id').primaryKey(),
+  provider:text('provider').notNull(),
+  email:text('email').notNull(),
+  displayName:text('display_name').notNull(),
+  firstSeen:integer('first_seen').notNull(),
+  lastSeen:integer('last_seen').notNull(),
+  lastCountry:text('last_country'),
+  lastRegion:text('last_region'),
+  lastCity:text('last_city'),
+},table=>[index('analytics_users_last_seen').on(table.lastSeen),index('analytics_users_first_seen').on(table.firstSeen)]);
+
+export const analyticsEvents=sqliteTable('analytics_events',{
+  id:text('id').primaryKey(),
+  userId:text('user_id'),
+  kind:text('kind').notNull(),
+  page:text('page').notNull(),
+  country:text('country'),
+  region:text('region'),
+  city:text('city'),
+  device:text('device').notNull(),
+  browser:text('browser').notNull(),
+  referrer:text('referrer').notNull(),
+  createdAt:integer('created_at').notNull(),
+},table=>[index('analytics_events_created').on(table.createdAt),index('analytics_events_user_created').on(table.userId,table.createdAt),index('analytics_events_kind_created').on(table.kind,table.createdAt)]);
+
+export const analyticsMeta=sqliteTable('analytics_meta',{
+  key:text('key').primaryKey(),
+  value:text('value').notNull(),
 });

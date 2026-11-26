@@ -1,0 +1,26 @@
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--brand-mark-gap, .55em);
+  color: var(--brand-forest, #082f26);
+  font-family: var(--font-brand-sans, 'DM Sans', 'Segoe UI', sans-serif);
+  font-size: var(--logo-size, inherit);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -.035em;
+  white-space: nowrap;
+}
+.mark {
+  display: block;
+  box-sizing: border-box;
+  width: var(--brand-mark-size, max(26px, 1.65em));
+  height: var(--brand-mark-size, max(26px, 1.65em));
+  flex: 0 0 auto;
+  padding: var(--brand-mark-padding, .14em);
+  border-radius: .3em;
+  background: var(--brand-forest, #082f26);
+  object-fit: contain;
+}
+.wordmark { display: block; }
+.inverse { color: #f4f6ea; }
+.inverse .mark { background: transparent; }

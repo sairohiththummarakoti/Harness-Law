@@ -1,0 +1,10 @@
+.shell { min-height: 100dvh; padding: 32px clamp(24px, 6vw, 88px); background: var(--brand-forest); color: #f5f8ef; font-family: var(--font-brand-sans); }
+.brand { display: inline-flex; font-size: 24px; }
+.card { max-width: 580px; margin: clamp(64px, 16vh, 160px) auto; padding: 40px; background: #fff; border: 1px solid var(--brand-line); border-radius: 18px; color: var(--brand-ink); }
+.eyebrow { font-size: 12px; letter-spacing: .12em; color: var(--brand-muted); }
+.card h1 { font: 500 clamp(28px, 4vw, 40px)/1.15 var(--font-brand-sans); letter-spacing: -.04em; margin: 18px 0; }
+.card p { font-size: 16px; line-height: 1.65; color: var(--brand-muted); }
+.card a { display: inline-flex; margin-top: 24px; padding: 12px 20px; min-height: 44px; align-items: center; background: var(--brand-citrus); border-radius: 8px; font-size: 14px; font-weight: 600; text-decoration: none; }
+.shell a:focus-visible { outline: 3px solid var(--brand-citrus); outline-offset: 5px; }
+.card a:focus-visible { outline-color: var(--brand-forest); }
+@media (max-width: 560px) { .card { padding: 26px; } }

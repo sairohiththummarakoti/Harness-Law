@@ -36,6 +36,27 @@
       "when": 1795551000000,
       "tag": "0004_account_policy_versions",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1795664197637,
+      "tag": "0003_puzzling_mephistopheles",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1795669360507,
+      "tag": "0004_dear_stingray",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1795706535115,
+      "tag": "0005_fresh_wild_pack",
+      "breakpoints": true
     }
   ]
 }

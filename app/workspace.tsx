@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowDownToLine, ArrowLeft, Award, BookOpen, BriefcaseBusiness, Check, CheckCheck, CheckCircle2, ChevronDown, ChevronRight, Circle, CircleHelp, Clock3, ExternalLink, FileCheck2, FileText, Fingerprint, FolderOpen, History, LayoutDashboard, ListChecks, Loader2, LockKeyhole, Menu, Plus, RefreshCw, Search, Settings2, ShieldCheck, Upload, UserRound, UsersRound, X, AlertCircle, Link2, Trash2, Undo2, UnlockKeyhole, Scale, Quote, Eye, PencilLine } from "lucide-react";
+import { ArrowDownToLine, ArrowLeft, Award, BookOpen, BriefcaseBusiness, Check, CheckCheck, CheckCircle2, ChevronRight, Circle, CircleHelp, Clock3, ExternalLink, FileCheck2, FileText, Fingerprint, FolderOpen, History, LayoutDashboard, ListChecks, Loader2, LockKeyhole, LogIn, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, Settings2, ShieldCheck, Upload, UserRound, UsersRound, X, AlertCircle, Link2, Trash2, Undo2, UnlockKeyhole, Scale, Quote, Eye, PencilLine } from "lucide-react";
 import { CRITERIA, applyAction, createEmptyCase, createSampleCase, criterionReady, currentResult, getBlockers, runBlockers, type CaseState, type Claim, type Evidence, type Action } from "@/lib/model";
-import { getOnboardingNextStep, getOnboardingRoute } from "@/lib/onboarding";
+import { getOnboardingNextStep } from "@/lib/onboarding";
 import { VISA_OPTIONS } from "@/lib/intake-catalog";
 import { countryName } from "@/lib/countries";
 import { FileFormImport } from "@/components/file-form-import";
@@ -11,6 +11,13 @@ import { CASE_NAME_IMPORT_FIELDS, DRAFT_IMPORT_FIELDS, PROFILE_IMPORT_FIELDS, PR
 import type { ImportValue } from "@/lib/form-import";
 import DriveConnect from "./drive-connect";
 import "./workspace-polish.css";
+import { BrandLogo, BrandMark } from "@/components/brand-logo";
+import { WorkspaceHelp } from "@/components/workspace-help";
+import { EvidenceLibraryProvider } from "@/components/evidence-library-context";
+import { EvidenceDrive } from "@/components/evidence-drive";
+import { AnalyticsTracker } from "@/components/analytics-tracker";
+import { EvidenceRequestError, uploadEvidenceFile, readEvidenceFile, deleteEvidenceItem } from "@/lib/evidence-client";
+import { planEvidenceUpload } from "@/lib/evidence-upload-plan";
 const importTextPatch = (patch: Record<string, ImportValue>): Record<string, string> => Object.fromEntries(Object.entries(patch).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
 
 type User = { userId: string; displayName: string; email: string } | null;
@@ -79,22 +86,28 @@ function FactCard({ fact, document, dispatch, openSource, notify, importDisabled
   return <article className="panel fact-card"><div className="panel-header"><h3>{fact.label}</h3><Pill tone={fact.status === "confirmed" || fact.status === "corrected" ? "green" : "amber"}>{readable(fact.status)}</Pill></div><div className="panel-body"><div className="field-grid"><div><span className="field-label">Source value</span><p className="fact-value">{fact.originalValue}</p></div><div><span className="field-label">Current value</span><p className="fact-value">{fact.value}</p></div></div><button className="citation fact-source" disabled={!document} onClick={() => document && openSource({ sourceId: document.id, sourceVersion: document.version, page: fact.page, quote: document.excerpt }, fact.label)}><FileText size={14} />{document?.name || "Source unavailable"} · p. {fact.page}</button><p className="field-help">{fact.reason || "Compare the source and confirm the fact before relying on it."}</p>{correcting && <><FileFormImport fields={factImportFields(fact.label)} values={{ value, reason }} contextKey={`${importContext}:${fact.id}:${fact.value}`} disabled={importDisabled} saveNote="Apply fills your correction draft. Compare it with the original source and use Save correction." onApply={patch => { if (typeof patch.value === "string") setValue(patch.value); if (typeof patch.reason === "string") setReason(patch.reason); }} /><div className="field-grid"><Field label="Corrected value" value={value} onChange={setValue} /><Field label="Reason for correction" value={reason} onChange={setReason} hint="The original source value remains in the record." /></div></>}<div className="fact-actions">{correcting ? <><button className="button primary small" disabled={!value.trim() || !reason.trim()} onClick={() => { dispatch({ type: "fact", id: fact.id, value, reason, status: "corrected" }); setCorrecting(false); notify("Correction saved with its reason. Dependent sections need renewed review."); }}>Save correction</button><button className="button ghost small" onClick={() => setCorrecting(false)}>Cancel</button></> : <><button className="button secondary small" onClick={() => { dispatch({ type: "fact", id: fact.id, status: "confirmed" }); notify("Fact confirmed."); }}><Check size={14} />Confirm</button><button className="button ghost small" onClick={() => { setValue(fact.value); setCorrecting(true); }}>Correct value</button><button className="button ghost small" onClick={() => { dispatch({ type: "fact", id: fact.id, status: "unresolved" }); notify("Fact left unresolved for later review."); }}>Leave unresolved</button><button className="link-button" onClick={() => { dispatch({ type: "fact", id: fact.id, status: "issue", reason: "Applicant reported a source inconsistency. Review the original document." }); notify("Source issue recorded for review."); }}>Report issue</button></>}</div></div></article>;
 }
 
-export default function Workspace({ user, forceSample = false }: { user: User; forceSample?: boolean }) {
+export default function Workspace({ user, forceSample = false, canAccessAdmin = false, showOverview = false }: { user: User; forceSample?: boolean; canAccessAdmin?: boolean; showOverview?: boolean }) {
   const [state, setState] = useState<CaseState>(() => user && !forceSample ? createEmptyCase() : createSampleCase());
   const [saveStatus, setSaveStatus] = useState<SaveStatus>(user && !forceSample ? "loading" : "sample");
   const [saveMessage, setSaveMessage] = useState("");
   const [savePulse, setSavePulse] = useState(0);
   const [toast, setToast] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
   const [profileTab, setProfileTab] = useState("personal");
-  const [query, setQuery] = useState("");
   const [evidenceFilter, setEvidenceFilter] = useState("all");
   const [selectedCriteria, setSelectedCriteria] = useState<string[]>([]);
-  const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const deletingRef = useRef(false);
+  const [uploadProgress, setUploadProgress] = useState("");
+  const [uploadNotice, setUploadNotice] = useState("");
+  const failedDirectory = useRef(false);
   const uploadInFlight = useRef(false);
   const failedReplacementId = useRef<string | null>(null);
+  const uploadFolderId = useRef<string | null>(null);
+  const failedFolderId = useRef<string | null>(null);
   const [uploadError, setUploadError] = useState("");
   const [consentChecked, setConsentChecked] = useState(false);
   const [manualText, setManualText] = useState("");
@@ -108,11 +121,27 @@ export default function Workspace({ user, forceSample = false }: { user: User; f
   const saving = useRef(false);
   const loaded = useRef(!user || forceSample);
   const fileInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
   const replacementId = useRef<string | null>(null);
   const failedFiles = useRef<File[]>([]);
+  const failedUploadContext = useRef("");
   const personalSnapshot = useRef<CaseState | null>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const page = state.lastPage === "overview" ? "dashboard" : state.lastPage === "final" ? "review" : state.lastPage || "dashboard";
+
+  useEffect(() => {
+    try { setSidebarCollapsed(window.localStorage.getItem("harness-law:sidebar-collapsed") === "1"); } catch { /* Keep navigation usable when browser storage is unavailable. */ }
+  }, []);
+  useEffect(() => {
+    failedFiles.current = []; failedUploadContext.current = "";
+    failedFolderId.current = null; failedReplacementId.current = null; failedDirectory.current = false;
+    setUploadError(""); setUploadNotice("");
+  }, [state.id, state.mode, user?.userId]);
+  function toggleSidebar() {
+    const next = !sidebarCollapsed;
+    setSidebarCollapsed(next);
+    try { window.localStorage.setItem("harness-law:sidebar-collapsed", next ? "1" : "0"); } catch { /* The toggle still works for this session. */ }
+  }
 
   const notify = useCallback((message: string) => setToast(message), []);
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(""), 5500); return () => clearTimeout(timer); }, [toast]);
@@ -125,14 +154,15 @@ export default function Workspace({ user, forceSample = false }: { user: User; f
       const result = await response.json() as { state: CaseState; revision: number };
       if (!active) return;
       serverRevision.current = result.revision;
-      stateRef.current = result.state;
-      setState(result.state);
+      const openedState = showOverview ? { ...result.state, lastPage: "dashboard" } : result.state;
+      stateRef.current = openedState;
+      setState(openedState);
       loaded.current = true;
       setCaseLoaded(true);
       setSaveStatus("saved");
     }).catch(error => { if (active) { setSaveStatus("error"); setSaveMessage(error.message); } });
     return () => { active = false; };
-  }, [user, forceSample]);
+  }, [user, forceSample, showOverview]);
 
   const persist = useCallback(async () => {
     if (!user || forceSample || !loaded.current || saving.current || !dirty.current || stateRef.current.mode === "sample") return;
@@ -154,10 +184,10 @@ export default function Workspace({ user, forceSample = false }: { user: User; f
   }, [user, forceSample]);
 
   useEffect(() => {
-    if (!user || !loaded.current || !dirty.current || saveStatus === "conflict" || saveStatus === "error") return;
+    if (!user || !loaded.current || !dirty.current || uploading || deleting || saveStatus === "conflict" || saveStatus === "error") return;
     const timer = setTimeout(() => { void persist(); }, 900);
     return () => clearTimeout(timer);
-  }, [state, saveStatus, savePulse, persist, user]);
+  }, [state, saveStatus, savePulse, persist, user, uploading, deleting]);
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => { if (dirty.current && stateRef.current.mode === "personal") { event.preventDefault(); event.returnValue = ""; } };
     window.addEventListener("beforeunload", handler);
@@ -166,6 +196,7 @@ export default function Workspace({ user, forceSample = false }: { user: User; f
 
   const dispatch = useCallback((action: Action) => {
     if (user && !loaded.current) { notify("Load your saved case before making changes."); return; }
+    if (deletingRef.current && action.type !== "navigate") { notify("Wait for deletion to finish before editing your case."); return; }
     if (action.type === "remove_document" && uploadInFlight.current) { notify("Finish the current upload before removing a source."); return; }
     try {
       const next = applyAction(stateRef.current, action);
@@ -209,42 +240,119 @@ export default function Workspace({ user, forceSample = false }: { user: User; f
     const generation = stateRef.current.runs[criterion].generation;
     timers.current.push(setTimeout(() => { dispatch({ type: "finish_run", criterion, generation }); notify("Sample run completed. Evidence support and human review are separate checks."); }, 1800));
   }
-  function requestUpload(sourceId: string | null = null) {
+  function requestUpload(sourceId: string | null = null, folderId: string | null = null, kind: "files" | "folder" = "files") {
     if (uploadInFlight.current) { notify("Wait for the current upload batch to finish."); return; }
     if (!user) { notify("Sign in and start a personal case to upload private documents. Sample files are fictional."); return; }
     if (state.mode === "sample") { notify("Return to your personal case before uploading a document."); return; }
     if (!state.consent) { setModal({ kind: "consent" }); return; }
-    replacementId.current = sourceId; if (fileInput.current) { fileInput.current.multiple = !sourceId; fileInput.current.click(); }
+    replacementId.current = sourceId; uploadFolderId.current = folderId;
+    if (kind === "folder") { if (folderInput.current) { folderInput.current.value = ""; folderInput.current.click(); } return; }
+    if (fileInput.current) { fileInput.current.multiple = !sourceId; fileInput.current.click(); }
   }
-  async function uploadFiles(files: File[], replacementSourceId: string | null = null) {
-    setDragActive(false);
+  function evidenceFailure(error: unknown) {
+    if (error instanceof EvidenceRequestError && error.status === 409 && error.state && error.revision !== undefined) {
+      setRemoteConflict({ state: error.state, revision: error.revision }); setSaveStatus("conflict");
+      setSaveMessage("Your case changed during the evidence update. Compare the saved version before retrying.");
+    }
+    return error instanceof Error ? error.message : "The file could not be saved. Retry this file.";
+  }
+  async function retainFile(file: File, folderId: string | null = null, replacementSourceId: string | null = null): Promise<Evidence> {
+    if (!user || stateRef.current.mode !== "personal" || !loaded.current) throw new Error("Open your signed-in personal case to upload files.");
+    if (!stateRef.current.consent) throw new Error("Review and save file storage consent first.");
+    if (saving.current) throw new Error("Wait for your current changes to finish saving, then try again.");
+    if (dirty.current) { await persist(); if (dirty.current) throw new Error("Save your current case changes successfully before uploading."); }
+    const base = { ...stateRef.current, revision: serverRevision.current };
+    const localVersion = changeVersion.current;
+    const result = await uploadEvidenceFile(file, user.userId, base, folderId, replacementSourceId);
+    if (stateRef.current.id !== base.id || stateRef.current.mode !== "personal") throw new Error("The case changed. Your upload stays with its original case.");
+    if (changeVersion.current !== localVersion && (result.replayed || result.revision !== base.revision + 1)) {
+      throw new EvidenceRequestError("A newer case version was saved. Compare it before continuing.", 409, result.state, result.revision);
+    }
+    const changed = changeVersion.current !== localVersion;
+    const next = changed ? { ...applyAction(stateRef.current, { type: "complete_upload", caseId: base.id, document: result.document, replacementSourceId }), revision: result.revision } : result.state;
+    serverRevision.current = result.revision; stateRef.current = next; setState(next);
+    dirty.current = changed; setSaveStatus(changed ? "saving" : "saved");
+    return next.documents.find(document => document.objectId === result.document.objectId) ?? result.document;
+  }
+  async function importFile(file: File, signal?: AbortSignal) {
+    if (signal?.aborted) throw new DOMException("Canceled", "AbortError");
+    if (uploadInFlight.current) throw new Error("Wait for the current upload to finish.");
+    uploadInFlight.current = true; setUploading(true);
+    try { return await retainFile(file); }
+    catch (error) { evidenceFailure(error); throw error; }
+    finally { uploadInFlight.current = false; setUploading(false); }
+  }
+  async function grantFileConsent() {
+    if (!user || stateRef.current.mode !== "personal") throw new Error("Open your personal case to save file storage consent.");
+    if (saving.current || uploadInFlight.current) throw new Error("Wait for the current save or upload to finish.");
+    dispatch({ type: "consent", value: true }); await persist();
+    if (dirty.current || !stateRef.current.consent) throw new Error("Consent was not saved. Resolve the save message before uploading.");
+  }
+  async function uploadFiles(files: File[], replacementSourceId: string | null = null, folderId: string | null = null, directory = false) {
     if (!files.length) return;
-    if (uploadInFlight.current) { notify("Wait for the current upload batch to finish."); return; }
+    if (uploadInFlight.current) { notify("Wait for the current evidence update to finish."); return; }
     if (!user || stateRef.current.mode === "sample") { notify("Private uploads require a signed-in personal case."); return; }
     if (!stateRef.current.consent) { setModal({ kind: "consent" }); return; }
     if (replacementSourceId && files.length !== 1) { setUploadError("Choose exactly one file to replace this source."); return; }
-    const originCaseId = stateRef.current.id;
-    uploadInFlight.current = true;
-    setUploading(true);
+    uploadInFlight.current = true; setUploading(true); setUploadError(""); setUploadNotice("");
+    failedFiles.current = []; failedReplacementId.current = replacementSourceId; failedFolderId.current = folderId; failedDirectory.current = directory;
+    failedUploadContext.current = `${user.userId}:${stateRef.current.id}`;
+    let completed = 0;
     try {
-      if (dirty.current) { await persist(); if (dirty.current) { notify("Save your consent and case changes successfully before uploading. Then try again."); return; } }
-      setUploadError(""); failedFiles.current = []; failedReplacementId.current = replacementSourceId;
-      for (const file of files) {
-        if (file.size > 20 * 1024 * 1024) { failedFiles.current.push(file); setUploadError(file.name + " exceeds the 20 MB limit."); continue; }
-        try {
-          const body = new FormData(); body.append("file", file);
-          const response = await fetch("/api/evidence", { method: "POST", body, credentials: "same-origin", headers: { "X-Harness-Account": user!.userId } });
-          const result = await response.json() as { document: Evidence; error?: string };
-          if (!response.ok) throw new Error(result.error || "Upload did not finish. Try again.");
-          if (stateRef.current.id !== originCaseId || stateRef.current.mode !== "personal") throw new Error("The active case changed. This upload was not attached to another case.");
-          dispatch({ type: "complete_upload", caseId: originCaseId, replacementSourceId, document: result.document });
-          notify(file.name + " stored privately. It needs attention until scanning and extraction are connected.");
-        } catch (error) { failedFiles.current.push(file); setUploadError(error instanceof Error ? error.message : "Upload failed. Try again."); }
+      if (saving.current) throw new Error("Wait for your current changes to finish saving, then choose the folder or files again.");
+      const plan = planEvidenceUpload(files, stateRef.current.folders ?? [], folderId, stateRef.current.documents.length - (replacementSourceId ? 1 : 0), directory);
+      if (plan.skipped.length) setUploadNotice(`Skipped ${plan.skipped.length}: ${plan.skipped.slice(0, 5).join("; ")}${plan.skipped.length > 5 ? "; plus additional unsupported files" : ""}.`);
+      if (!plan.entries.length) { setUploadError("No supported files were selected. Choose non-empty documents up to 20 MB each."); return; }
+      if (plan.folders.length) {
+        let next = stateRef.current;
+        for (const folder of plan.folders) next = applyAction(next, { type: "folder_create", folder });
+        stateRef.current = next; setState(next); dirty.current = true; changeVersion.current++;
       }
-    } finally {
-      uploadInFlight.current = false; setUploading(false);
-      if (fileInput.current) fileInput.current.value = "";
+      if (dirty.current) { await persist(); if (dirty.current) throw new Error("Your folder structure could not be saved. Resolve the save message, then retry."); }
+      for (const [index, entry] of plan.entries.entries()) {
+        setUploadProgress(`Uploading ${index + 1} of ${plan.entries.length}: ${entry.file.name}`);
+        try { await retainFile(entry.file, entry.folderId, replacementSourceId); completed++; }
+        catch (error) { failedFiles.current.push(...plan.entries.slice(index).map(item => item.file)); setUploadError(evidenceFailure(error)); break; }
+      }
+      if (completed) notify(`${completed} ${completed === 1 ? "file saved" : "files saved"} to Evidence${directory ? " with their folder structure" : ""}.`);
+    } catch (error) { failedFiles.current = files; setUploadError(evidenceFailure(error)); }
+    finally { uploadInFlight.current = false; setUploading(false); setUploadProgress(""); if (fileInput.current) fileInput.current.value = ""; if (folderInput.current) folderInput.current.value = ""; }
+  }
+  function retryUpload() {
+    if (failedUploadContext.current !== `${user?.userId}:${stateRef.current.id}` || stateRef.current.mode !== "personal") {
+      failedFiles.current = []; setUploadError(""); notify("The upload belonged to another case. Choose files again in this case."); return;
     }
+    void uploadFiles([...failedFiles.current], failedReplacementId.current, failedFolderId.current, failedDirectory.current);
+  }
+  async function deleteEvidence(target: { kind: "file" | "folder"; id: string }) {
+    if (uploadInFlight.current) throw new Error("Wait for the current evidence update to finish.");
+    if (stateRef.current.mode === "sample") {
+      dispatch({ type: "delete_evidence", target });
+      notify("Deleted from this fictional sample session."); return;
+    }
+    if (!user || !loaded.current) throw new Error("Sign in and load your personal case before deleting evidence.");
+    if (saving.current || saveStatus === "conflict" || saveStatus === "error") throw new Error("Finish saving or resolve the workspace message before deleting evidence.");
+    uploadInFlight.current = true; deletingRef.current = true; setDeleting(true);
+    try {
+      if (dirty.current) { await persist(); if (dirty.current) throw new Error("Save your changes successfully before deleting evidence."); }
+      const base = { ...stateRef.current, revision: serverRevision.current };
+      const localVersion = changeVersion.current;
+      const result = await deleteEvidenceItem(target, user.userId, base);
+      if (stateRef.current.id !== base.id || stateRef.current.mode !== "personal") throw new Error("Your case changed. Refresh to see the saved deletion.");
+      // Only navigation can change locally while deletion is in flight.
+      const changed = changeVersion.current !== localVersion;
+      const next = changed ? { ...result.state, lastPage: stateRef.current.lastPage } : result.state;
+      serverRevision.current = result.revision; stateRef.current = next; setState(next); dirty.current = changed;
+      setSaveStatus(changed ? "saving" : "saved"); setSaveMessage("");
+      notify(result.cleanupPending ? "Removed from Evidence. Private storage cleanup will retry when you reopen the workspace." : target.kind === "folder" ? "Folder and its contents deleted." : "File deleted from Evidence and private storage.");
+    } catch (error) { evidenceFailure(error); throw error; }
+    finally { uploadInFlight.current = false; deletingRef.current = false; setDeleting(false); }
+  }
+  async function downloadEvidence(document: Evidence) {
+    try {
+      const file = await readEvidenceFile(document, user?.userId ?? null, stateRef.current.id);
+      const url = URL.createObjectURL(file); const link = window.document.createElement("a"); link.href = url; link.download = file.name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) { notify(evidenceFailure(error)); }
   }
   function downloadDraft() {
     const gaps = getBlockers(state);
@@ -257,10 +365,9 @@ export default function Workspace({ user, forceSample = false }: { user: User; f
   const reviewCount = state.criteria.flatMap(id => currentResult(state, id)?.claims || []).filter(c => c.reviewStatus !== "unreviewed").length;
   const outstandingFacts = state.facts.filter(f => f.status === "unresolved" || f.status === "issue");
   const isSample = state.mode === "sample";
-  const importDisabled = !caseLoaded || saveStatus === "saving" || saveStatus === "conflict" || saveStatus === "error";
-  const importContext = `${state.id}:${state.mode}:${page}`;
+  const importDisabled = !caseLoaded || uploading || deleting || saveStatus === "saving" || saveStatus === "conflict" || saveStatus === "error";
+  const importContext = `${user?.userId ?? "guest"}:${state.id}:${state.mode}:${page}`;
   const importSaveNote = isSample ? "Applied answers stay in this fictional sample session." : "Applied answers use the usual case autosave. Check the save status before leaving.";
-  const setupNeeded = !isSample && caseLoaded && getOnboardingRoute(state) === 'setup';
   const setupFocus = !state.intake && state.onboarding?.completedAt ? getOnboardingNextStep(state.onboarding.goal) : null;
   const firstName = state.profile.preferredName || state.profile.fullName.split(" ")[0] || user?.displayName.split(" ")[0] || "there";
   const criterionId = page.startsWith("criterion:") ? page.split(":")[1] : null;
@@ -276,12 +383,77 @@ export default function Workspace({ user, forceSample = false }: { user: User; f
     return <article key={id} className="criterion-card"><div className="criterion-top"><span className="criterion-number">{id}</span><Pill tone={ready ? "green" : result ? "amber" : "gray"}>{status}</Pill></div><h3 className="criterion-title">{criterion.title}</h3><p className="criterion-description">{criterion.description}</p><div className="criterion-meta"><span><FolderOpen size={14} />{sources} {sources === 1 ? "source" : "sources"}</span><span><CheckCheck size={14} />{result?.claims.filter(c => c.reviewStatus !== "unreviewed").length || 0} reviewed</span></div><div className="criterion-divider" /><div className="criterion-footer"><span><span className={`dot ${run?.status === "succeeded" ? "green" : ""}`} />{run?.status === "succeeded" ? "Run complete" : readable(run?.status || "idle")}</span><button className="link-button" onClick={() => navigate(`criterion:${id}`)}>Open section<ChevronRight size={15} /></button></div></article>;
   }
 
+  function intakeCard() {
+    const intake = state.intake;
+    const completed = !!intake?.completedAt;
+    const visa = VISA_OPTIONS.find(option => option.id === intake?.answers.visaType)?.label ?? "Your immigration plans";
+    const birthplace = intake?.answers.birthCountry === "OTHER" ? intake.answers.birthCountryOther : countryName(intake?.answers.birthCountry ?? "");
+    const citizenships = intake?.answers.citizenships.map(countryName).filter(Boolean).join(", ");
+    return <section className="overview-intake" aria-labelledby="overview-intake-title">
+      <div className="overview-intake-heading"><span className="overview-intake-symbol" aria-hidden="true"><FolderOpen size={20} /></span><h2 id="overview-intake-title">Your intake</h2><span className="overview-intake-state">{completed ? "Intake complete" : intake ? "In progress" : "Not started"}</span></div>
+      <p className="overview-intake-visa">{completed ? visa : "A little about you."}</p>
+      {completed ? <dl className="overview-intake-facts">
+        <div><dt>Country of birth</dt><dd>{birthplace || "Not provided"}</dd></div>
+        <div><dt>Citizenship</dt><dd>{citizenships || "Not provided"}</dd></div>
+      </dl> : <p className="overview-intake-description">{intake ? "Your saved answers are here whenever you’re ready to continue." : "Add your background and immigration plans when you’re ready. You can update them here at any time."}</p>}
+      {completed && intake?.answers.visaType !== "eb1a" && <p className="overview-intake-note">Your visa interest is recorded. This workspace provides EB-1A preparation tools.</p>}
+      <a className="overview-intake-edit" href="/onboarding?edit=1"><PencilLine size={16} aria-hidden="true" />{completed ? "Edit intake" : intake ? "Continue intake" : "Start intake"}</a>
+    </section>;
+  }
+
   function dashboard() {
-    return <><div className="page-heading"><div><div className="eyebrow">YOUR APPLICANT WORKSPACE</div><h1>Welcome back, {firstName}.</h1><p className="title-subtitle">Every accomplishment has a story. Let’s bring yours together.</p></div><div className="heading-actions"><Pill tone={isSample ? "amber" : "green"}>{isSample ? "Fictional sample case" : "Personal case"}</Pill></div></div>
-      <section className="hero-panel"><div className="hero-copy"><span className="eyebrow">YOUR NEXT STEP</span><h2>{outstandingFacts.length ? "A little clarity goes a long way." : state.documents.length ? "Turn your evidence into a clear story." : "Your next chapter starts here."}</h2><p>{outstandingFacts.length ? `${outstandingFacts.length} facts need a closer look. Confirm the details behind your evidence to keep your case moving forward.` : state.documents.length ? "Review each section independently, then bring the current revisions into your working draft." : "Start with your profile and the achievements you want to document. Your workspace will grow with your case."}</p><button className="button primary" onClick={() => navigate(outstandingFacts.length ? "facts" : state.documents.length ? "criteria" : "profile")}>{outstandingFacts.length ? "Review your facts" : state.documents.length ? "Review your criteria" : "Build your profile"}<ChevronRight size={16} /></button><span className="hero-step">{outstandingFacts.length ? "A thoughtful check now. A clearer draft later." : "One considered step at a time."}</span></div><div className="hero-illustration" aria-hidden="true"><img src="/images/harness-horizon.webp" alt="" width="1254" height="1254" loading="lazy" /></div></section>
-      <div className="stats-heading"><h2>Your preparation at a glance</h2><span>Every detail, in one place.</span></div>
-      <section className="stats-grid" aria-label="Workspace progress">{[{ icon: FolderOpen, value: state.documents.length, label: "Evidence sources", detail: `${state.documents.filter(d => d.status === "ready").length} ${isSample ? "sample sources ready" : "processed sources"}` }, { icon: ListChecks, value: state.criteria.length, label: "Selected criteria", detail: "Each reviewed independently" }, { icon: BookOpen, value: `${readyCount} / ${state.criteria.length}`, label: "Ready to compose", detail: "Support and review checked" }, { icon: CheckCheck, value: reviewCount, label: "Reviewed paragraphs", detail: "Review belongs to a revision" }].map(item => <div className="stat-card" key={item.label}><div className="stat-icon"><item.icon size={18} /></div><span className="stat-value">{item.value}</span><span className="stat-label">{item.label}</span><span className="stat-detail">{item.detail}</span></div>)}</section>
-      <div className="content-grid"><section className="primary-column"><div className="section-heading"><div><h2>Your case, section by section</h2><p>Build a complete picture from individual achievements.</p></div><button className="link-button" onClick={() => navigate("criteria")}>Manage criteria<ChevronRight size={15} /></button></div><div className="criteria-grid">{state.criteria.map(criterionCard)}</div>{!state.criteria.length && <div className="panel"><EmptyState icon={<ListChecks size={28} />} title="Choose where to begin" action={<button className="button primary" onClick={() => navigate("criteria")}>Explore the criteria<ChevronRight size={16} /></button>}>Select the criteria that relate to your experience. You can revisit your selection at any time.</EmptyState></div>}<p className="footer-note"><ShieldCheck size={14} />Workspace progress reflects preparation, never the likelihood of approval.</p></section><aside className="secondary-column"><div className="panel"><div className="panel-header"><h3>Your next actions</h3><span className="nav-count">3</span></div><div className="task-list">{[{ title: outstandingFacts.length ? `Confirm ${outstandingFacts.length} source facts` : "Review your profile", detail: outstandingFacts.length ? "Make the details consistent" : "Keep your information current", page: outstandingFacts.length ? "facts" : "profile", tone: "amber" }, { title: "Review evidence support", detail: "Check the story behind each claim", page: state.criteria[0] ? `criterion:${state.criteria[0]}` : "criteria", tone: "green" }, { title: "Assemble your working draft", detail: "Choose your current sections", page: "composition", tone: "gray" }].map(task => <button className="task-row" key={task.title} onClick={() => navigate(task.page)}><span className={`task-check ${task.tone}`}><Circle size={17} /></span><span><strong>{task.title}</strong><small>{task.detail}</small></span><ChevronRight size={15} /></button>)}</div></div><div className="panel"><div className="panel-header"><h3>Recent activity</h3><Clock3 size={16} /></div><div className="activity-list">{state.activities.slice(0, 3).map(activity => <div className="activity-row" key={activity.id}><span className="activity-dot" /><div><strong>{activity.title}</strong><p>{activity.detail}</p><small>{dateLabel(activity.at)}</small></div></div>)}{!state.activities.length && <p className="field-help">Your preparation milestones will appear here.</p>}</div></div><div className="quiet-note"><BookOpen size={20} /><h3>A clear process. Your pace.</h3><p>Your evidence, your decisions, and every revision stay connected.</p><button className="link-button" onClick={() => navigate("help")}>How it works<ChevronRight size={14} /></button></div></aside></div></>;
+    const showIntake = !isSample && caseLoaded;
+    const nextActions = [
+      { title: outstandingFacts.length ? `Confirm ${outstandingFacts.length} source facts` : "Review your profile", detail: outstandingFacts.length ? "Make the details consistent" : "Keep your information current", page: outstandingFacts.length ? "facts" : "profile", icon: UserRound },
+      { title: "Review evidence support", detail: "Check the story behind each claim", page: state.criteria[0] ? `criterion:${state.criteria[0]}` : "criteria", icon: FolderOpen },
+      { title: "Assemble your working draft", detail: "Choose your current sections", page: "composition", icon: BookOpen },
+    ];
+    return <div className="overview-page">
+      <header className="overview-welcome">
+        <div><span className="eyebrow">OVERVIEW</span><h1>Welcome back, {firstName}.</h1><p>Let’s take the next step in your preparation.</p></div>
+        <span className="overview-case-label">{isSample ? <BookOpen size={15} aria-hidden="true" /> : <LockKeyhole size={15} aria-hidden="true" />}{isSample ? "Fictional sample" : "Personal workspace"}</span>
+      </header>
+
+      <div className={`overview-summary${showIntake ? " has-intake" : ""}`}>
+        {showIntake && intakeCard()}
+        <section className="overview-next" aria-labelledby="overview-next-step">
+          <div className="overview-next-label"><span aria-hidden="true">{outstandingFacts.length ? <Fingerprint size={18} /> : state.documents.length ? <FolderOpen size={18} /> : <UserRound size={18} />}</span><span>Next step</span></div>
+          <h2 id="overview-next-step">{outstandingFacts.length ? "Make the details clear." : state.documents.length ? "Bring your evidence together." : "Build your profile."}</h2>
+          <p>{outstandingFacts.length ? `${outstandingFacts.length} facts need your attention. Review the details behind your evidence.` : state.documents.length ? "Review the support for each section before bringing your case into a working draft." : "Add your professional background and the achievements that tell your story."}</p>
+          <button className="button primary" onClick={() => navigate(outstandingFacts.length ? "facts" : state.documents.length ? "criteria" : "profile")}>{outstandingFacts.length ? "Review facts" : state.documents.length ? "Review criteria" : "Start my profile"}</button>
+        </section>
+      </div>
+
+      <section className="overview-progress" aria-labelledby="overview-progress-title">
+        <div className="stats-heading"><h2 id="overview-progress-title">Your preparation at a glance</h2></div>
+        <div className="stats-grid">
+          {[
+            { icon: FolderOpen, value: state.documents.length, label: "Evidence sources", detail: `${state.documents.filter(d => d.status === "ready").length} ${isSample ? "sample sources ready" : "processed sources"}` },
+            { icon: ListChecks, value: state.criteria.length, label: "Selected criteria", detail: "Each reviewed independently" },
+            { icon: BookOpen, value: `${readyCount} / ${state.criteria.length}`, label: "Ready to compose", detail: "Support and review checked" },
+            { icon: CheckCheck, value: reviewCount, label: "Reviewed paragraphs", detail: "Review belongs to a revision" },
+          ].map(item => <div className="stat-card" key={item.label}><div className="stat-icon" aria-hidden="true"><item.icon size={18} /></div><span className="stat-value">{item.value}</span><span className="stat-label">{item.label}</span><span className="stat-detail">{item.detail}</span></div>)}
+        </div>
+      </section>
+
+      <section className="overview-sections" aria-labelledby="overview-sections-title">
+        <div className="section-heading"><div><h2 id="overview-sections-title">Your case sections</h2><p>Build your story, one achievement at a time.</p></div><button className="button secondary small" onClick={() => navigate("criteria")}>Manage criteria</button></div>
+        {state.criteria.length ? <div className="criteria-grid">{state.criteria.map(criterionCard)}</div> : <div className="panel"><EmptyState icon={<ListChecks size={28} />} title="Choose where to begin" action={<button className="button primary" onClick={() => navigate("criteria")}>Explore the criteria</button>}>Select the criteria that relate to your experience. You can revisit your selection at any time.</EmptyState></div>}
+        <p className="footer-note"><ShieldCheck size={14} />Workspace progress reflects preparation, never the likelihood of approval.</p>
+      </section>
+
+      <div className="overview-details">
+        <section className="panel overview-actions" aria-labelledby="overview-actions-title">
+          <div className="panel-header"><h2 id="overview-actions-title">Your next actions</h2><span className="nav-count">{nextActions.length}</span></div>
+          <div className="task-list">{nextActions.map(task => <button className="task-row" key={task.title} onClick={() => navigate(task.page)}><span className="overview-task-icon" aria-hidden="true"><task.icon size={18} /></span><span><strong>{task.title}</strong><small>{task.detail}</small></span></button>)}</div>
+        </section>
+        <section className="panel overview-activity" aria-labelledby="overview-activity-title">
+          <div className="panel-header"><h2 id="overview-activity-title">Recent activity</h2><Clock3 size={18} aria-hidden="true" /></div>
+          <div className="activity-list">{state.activities.slice(0, 3).map(activity => <div className="activity-row" key={activity.id}><span className="activity-dot" aria-hidden="true" /><div><strong>{activity.title}</strong><p>{activity.detail}</p><small>{dateLabel(activity.at)}</small></div></div>)}{!state.activities.length && <div className="overview-activity-empty"><Clock3 size={24} aria-hidden="true" /><p>Your preparation milestones will appear here.</p></div>}</div>
+        </section>
+      </div>
+
+    </div>;
   }
 
   function profileScreen() {
@@ -293,8 +465,13 @@ export default function Workspace({ user, forceSample = false }: { user: User; f
   }
 
   function evidenceScreen() {
-    const documents = state.documents.filter(d => d.name.toLowerCase().includes(query.toLowerCase()) && (evidenceFilter === "all" || evidenceFilter === "needs_attention" && d.status !== "ready" || d.associations.some(a => a.criterion === evidenceFilter && a.status !== "removed")));
-    return <><div className="page-heading"><div><span className="eyebrow">03 · YOUR SOURCE OF TRUTH</span><h1>Evidence library</h1><p className="title-subtitle">One home for your documents. A clear connection to every claim.</p></div><button className="button primary" onClick={() => requestUpload()}><Plus size={17} />Add evidence</button></div><div className={`upload-zone ${dragActive ? "drag-active" : ""}`} onDragOver={e => { e.preventDefault(); setDragActive(true); }} onDragLeave={() => setDragActive(false)} onDrop={e => { e.preventDefault(); void uploadFiles(Array.from(e.dataTransfer.files)); }}><div className="upload-icon"><Upload size={22} /></div><div><h3>{uploading ? "Storing your document privately…" : "Bring your evidence together"}</h3><p>Drag files here or <button className="link-button" onClick={() => requestUpload()}>browse files</button></p><span className="field-help">PDF, DOCX, JPG, PNG or TXT · Up to 20 MB per file</span></div><Pill tone="gray"><LockKeyhole size={12} />Private uploads</Pill></div>{isSample && <div className="notice info"><CircleHelp size={19} /><p>These six fictional documents let you explore citations and source associations. Uploads require a signed-in personal case; sample content is never presented as your evidence.</p></div>}{!state.consent && <div className="notice warning"><ShieldCheck size={19} /><p>Review and save your processing consent before uploading personal documents.</p><button className="button secondary small" onClick={() => setModal({ kind: "consent" })}>Review consent</button></div>}{uploadError && <div className="notice warning" role="alert"><AlertCircle size={19} /><p>{uploadError}</p><button className="button secondary small" onClick={() => void uploadFiles([...failedFiles.current], failedReplacementId.current)}>Retry upload</button></div>}<div className="evidence-toolbar"><label className="search-field"><Search size={17} /><input aria-label="Search evidence" placeholder="Search your evidence…" value={query} onChange={e => setQuery(e.target.value)} /></label><select className="select filter-select" aria-label="Filter evidence" value={evidenceFilter} onChange={e => setEvidenceFilter(e.target.value)}><option value="all">All evidence</option><option value="needs_attention">Needs attention</option>{CRITERIA.map(c => <option value={c.id} key={c.id}>{c.id} · {c.shortTitle}</option>)}</select><span className="text-muted">{documents.length} sources</span></div><div className="panel evidence-list">{documents.map(doc => <div className="evidence-row" key={doc.id}><div className="file-icon"><FileText size={22} /><small>{doc.kind}</small></div><div className="evidence-main"><button className="evidence-name link-button" onClick={() => setModal({ kind: "evidence", sourceId: doc.id })}>{doc.name}</button><p>{doc.exhibit} · Version {doc.version} · {doc.pages || "—"} pages · {dateLabel(doc.uploadedAt)}</p><div className="inline-actions">{doc.associations.filter(a => a.status !== "removed").map(a => <span key={a.criterion} className={`association-tag ${a.status}`}>{a.criterion}{a.status === "proposed" ? " · proposed" : ""}</span>)}</div></div><div className="evidence-actions"><Pill tone={doc.status === "ready" ? "green" : "amber"}>{doc.sample ? "Sample source" : readable(doc.status)}</Pill><button className="icon-button" aria-label={`Review ${doc.name}`} onClick={() => setModal({ kind: "evidence", sourceId: doc.id })}><ChevronRight size={19} /></button></div></div>)}{!documents.length && <EmptyState title={query ? "No matching evidence" : "Your evidence starts here"}>{query ? "Try another filename or criterion filter." : "Add a document when you’re ready. Uploaded files remain quarantined until real safety scanning and extraction are available."}</EmptyState>}</div><p className="footer-note"><Link2 size={14} />One source can support multiple criteria. Confirm each association separately; removing an association keeps the document.</p></>;
+    return <>
+      {!state.consent && !isSample && <div className="notice warning"><ShieldCheck size={19} /><p>Review file storage consent before adding your documents.</p><button className="button secondary small" onClick={() => setModal({ kind: "consent" })}>Review consent</button></div>}
+      <EvidenceDrive state={state} initialFilter={evidenceFilter} disabled={!caseLoaded || uploading || deleting || saveStatus === "conflict" || saveStatus === "error"} uploading={uploading} uploadError={uploadError} onUpload={(files, folderId) => void uploadFiles(files, null, folderId)} onRequestUpload={(folderId, kind) => requestUpload(null, folderId, kind)} onDelete={deleteEvidence} onOpen={document => setModal({ kind: "evidence", sourceId: document.id })} onDownload={document => void downloadEvidence(document)} onAction={dispatch} />
+      {uploadProgress && <p className="field-help" role="status">{uploadProgress}</p>}
+      {uploadNotice && <p className="field-help" role="status">{uploadNotice}</p>}
+      {uploadError && failedFiles.current.length > 0 && <button className="button secondary small" disabled={uploading || deleting || saveStatus === "conflict"} onClick={retryUpload}>Retry upload</button>}
+    </>;
   }
 
   function factsScreen() {
@@ -333,25 +510,52 @@ export default function Workspace({ user, forceSample = false }: { user: User; f
   }
 
   function settingsScreen() {
-    return <><div className="page-heading"><div><span className="eyebrow">YOUR WORKSPACE, YOUR CONTROL</span><h1>{page === "help" ? "A little guidance" : "Settings & privacy"}</h1><p className="title-subtitle">A clear view of how this workspace works.</p></div></div><div className="settings-grid"><section className="panel"><div className="panel-header"><h2>Service availability</h2><Settings2 size={19} /></div><div className="panel-body"><div className="summary-line"><span>Case save & recovery</span><Pill tone={user ? "green" : "gray"}>{user ? "Connected" : "Sign-in required"}</Pill></div><div className="summary-line"><span>Private file storage</span><Pill tone="green">Quarantine only</Pill></div>{["Evidence safety scanning & extraction", "AI criterion processing", "Approved production rules", "Official form templates", "Final packet assembly"].map(label => <div className="summary-line" key={label}><span>{label}</span><Pill tone="amber">Not connected</Pill></div>)}<div className="summary-line"><span>Local form import</span><Pill tone="green">Available in your browser</Pill></div><p className="field-help">Fictional sample runs demonstrate status and version handling. Personal documents are never sent to an external AI provider by this release.</p></div></section><section className="panel"><div className="panel-header"><h2>Privacy & consent</h2><ShieldCheck size={19} /></div><div className="panel-body"><p>Personal cases are saved to your authenticated account. Files added to the Evidence library are stored privately in quarantine and are not rendered, scanned, or extracted until those services exist.</p><p>Form import reads a file locally in your browser. The file and unused extracted text are not uploaded. Only answers you apply enter your case through its usual save behavior; they are applicant-entered information, not verified evidence.</p><p>Consent is required before evidence uploads. Withdrawing it prevents future uploads; it does not delete existing stored documents.</p><Pill tone={state.consent ? "green" : "amber"}>{state.consent ? isSample ? "Fictional sample consent" : "Processing consent recorded" : "Consent not recorded"}</Pill><div className="inline-actions"><button className="button secondary small" onClick={() => { setConsentChecked(false); setModal({ kind: "consent" }); }}>Review consent</button>{state.consent && !isSample && <button className="link-button" onClick={() => { dispatch({ type: "consent", value: false }); notify("Consent withdrawn for future processing and uploads."); }}>Withdraw consent</button>}</div></div></section><section className="panel"><div className="panel-header"><h2>Optional attorney review</h2><UsersRound size={19} /></div><div className="panel-body"><p>A qualified attorney can help assess the record and your circumstances. Attorney engagement, invitations, and secure sharing are not connected in this release.</p><p>No attorney has been invited or engaged through this workspace. Applicant self-review and working-draft downloads remain available.</p><button className="button secondary small" onClick={downloadDraft}><ArrowDownToLine size={15} />Download for your own review</button></div></section><section className="panel"><div className="panel-header"><h2>Your case</h2><FolderOpen size={19} /></div><div className="panel-body"><FileFormImport fields={CASE_NAME_IMPORT_FIELDS} values={{ name: state.name }} contextKey={importContext} disabled={importDisabled} saveNote={importSaveNote} onApply={patch => { if (typeof patch.name === "string") dispatch({ type: "rename", name: patch.name }); }} /><Field label="Case name" value={state.name} onChange={name => dispatch({ type: "rename", name })} /><p className="field-help">{isSample ? "Sample changes stay in this browser session. Sign in to create a private saved case." : "Your last position is saved along with your case."}</p><div className="inline-actions">{user && state.mode === "personal" && <button className="button secondary small" onClick={exploreSample}>Explore fictional sample</button>}{forceSample && user ? <a className="button secondary small" href="/workspace">Open my personal case</a> : user ? <button className="button danger small" onClick={() => setModal({ kind: "reset" })}>Start a new personal case</button> : <a className="button primary small" href="/signup">Sign in to save<ChevronRight size={14} /></a>}<button className="link-button" onClick={downloadLocal}>Export local case copy</button></div></div></section></div><div className="panel"><div className="panel-header"><h2>How the pieces fit together</h2></div><div className="panel-body"><div className="how-it-works">{[{ number: "01", title: "Gather your evidence", text: "Keep each source once. Confirm its relationship to each criterion.", page: "evidence" }, { number: "02", title: "Check the details", text: "Review facts, exact source passages, and the wording of each claim.", page: "facts" }, { number: "03", title: "Build your working draft", text: "Choose current revisions. Review changes and preserve earlier versions.", page: "composition" }].map(item => <button key={item.number} onClick={() => navigate(item.page)}><span className="criterion-number">{item.number}</span><h3>{item.title}</h3><p>{item.text}</p><ChevronRight size={17} /></button>)}</div><a className="link-button" href="https://www.uscis.gov/policy-manual/volume-6-part-f-chapter-2" target="_blank" rel="noreferrer">Read maintained USCIS guidance<ExternalLink size={14} /></a></div></div></>;
+    return <><div className="page-heading"><div><span className="eyebrow">YOUR WORKSPACE, YOUR CONTROL</span><h1>Settings & privacy</h1><p className="title-subtitle">A clear view of how this workspace works.</p></div></div><div className="settings-grid"><section className="panel"><div className="panel-header"><h2>Service availability</h2><Settings2 size={19} /></div><div className="panel-body"><div className="summary-line"><span>Case save & recovery</span><Pill tone={user ? "green" : "gray"}>{user ? "Connected" : "Sign-in required"}</Pill></div><div className="summary-line"><span>Private file storage</span><Pill tone="green">Quarantine only</Pill></div>{["Evidence safety scanning & extraction", "AI criterion processing", "Approved production rules", "Official form templates", "Final packet assembly"].map(label => <div className="summary-line" key={label}><span>{label}</span><Pill tone="amber">Not connected</Pill></div>)}<div className="summary-line"><span>Local form import</span><Pill tone="green">Available in your browser</Pill></div><p className="field-help">Fictional sample runs demonstrate status and version handling. Personal documents are never sent to an external AI provider by this release.</p></div></section><section className="panel"><div className="panel-header"><h2>Privacy & consent</h2><ShieldCheck size={19} /></div><div className="panel-body"><p>Site analytics help us understand visits, devices, and approximate locations. They do not include your case answers or document contents. <a className="link-button" href="/privacy">Read about site analytics</a></p><p>Personal cases are saved to your authenticated account. All uploaded files, including documents used to fill forms, are stored privately in Evidence. Original files can be downloaded or read locally to suggest form answers; server safety scanning and evidence extraction are not connected.</p><p>Form import saves new files to Evidence and reads their text in your browser. Browse Evidence reuses a saved file. Only answers you review and apply fill your form; they remain applicant-entered information, not verified facts.</p><p>Consent is required before evidence uploads. Withdrawing it prevents future uploads; it does not delete existing stored documents.</p><Pill tone={state.consent ? "green" : "amber"}>{state.consent ? isSample ? "Fictional sample consent" : "Processing consent recorded" : "Consent not recorded"}</Pill><div className="inline-actions"><button className="button secondary small" onClick={() => { setConsentChecked(false); setModal({ kind: "consent" }); }}>Review consent</button>{state.consent && !isSample && <button className="link-button" onClick={() => { dispatch({ type: "consent", value: false }); notify("Consent withdrawn for future processing and uploads."); }}>Withdraw consent</button>}</div></div></section><section className="panel"><div className="panel-header"><h2>Optional attorney review</h2><UsersRound size={19} /></div><div className="panel-body"><p>A qualified attorney can help assess the record and your circumstances. Attorney engagement, invitations, and secure sharing are not connected in this release.</p><p>No attorney has been invited or engaged through this workspace. Applicant self-review and working-draft downloads remain available.</p><button className="button secondary small" onClick={downloadDraft}><ArrowDownToLine size={15} />Download for your own review</button></div></section><section className="panel"><div className="panel-header"><h2>Your case</h2><FolderOpen size={19} /></div><div className="panel-body"><FileFormImport fields={CASE_NAME_IMPORT_FIELDS} values={{ name: state.name }} contextKey={importContext} disabled={importDisabled} saveNote={importSaveNote} onApply={patch => { if (typeof patch.name === "string") dispatch({ type: "rename", name: patch.name }); }} /><Field label="Case name" value={state.name} onChange={name => dispatch({ type: "rename", name })} /><p className="field-help">{isSample ? "Sample changes stay in this browser session. Sign in to create a private saved case." : "Your last position is saved along with your case."}</p><div className="inline-actions">{user && state.mode === "personal" && <button className="button secondary small" onClick={exploreSample}>Explore fictional sample</button>}{forceSample && user ? <a className="button secondary small" href="/workspace">Open my personal case</a> : user ? <button className="button danger small" onClick={() => setModal({ kind: "reset" })}>Start a new personal case</button> : <a className="button primary small" href="/signup">Sign in to save<ChevronRight size={14} /></a>}<button className="link-button" onClick={downloadLocal}>Export local case copy</button></div></div></section></div></>;
   }
 
-  return <div className={`app-shell ${mobileOpen ? "nav-open" : ""}`}>
+  return <EvidenceLibraryProvider value={{ documents: state.documents, folders: state.folders ?? [], mode: state.mode, caseId: state.id, accountId: user?.userId ?? null, consent: state.consent, disabled: importDisabled, upload: importFile, read: (document, signal) => readEvidenceFile(document, user?.userId ?? null, state.id, signal), grantConsent: grantFileConsent }}><div className={`app-shell ${mobileOpen ? "nav-open" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <AnalyticsTracker page={isSample ? 'workspace/sample' : `workspace/${page}`} />
     <a className="skip-link" href="#main-content">Skip to content</a>
     {mobileOpen && <button className="nav-overlay" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
-    <aside className="sidebar" aria-label="Primary navigation"><button className="brand" onClick={() => navigate("dashboard")} aria-label="Harness Law overview"><span className="brand-mark"><Scale size={25} aria-hidden="true" /></span><span><span className="brand-name">Harness Law<span className="brand-period">.</span></span><span className="brand-tag">YOUR NEXT CHAPTER</span></span></button><button className="case-switcher" onClick={() => navigate("settings")}><span className="case-avatar">{state.profile.fullName ? state.profile.fullName.split(" ").map(s => s[0]).slice(0, 2).join("") : "MY"}</span><span><strong>{state.profile.fullName || "My preparation"}</strong><small>EB-1A workspace</small></span><ChevronDown size={15} /></button><nav><div className="nav-group"><span className="nav-label">YOUR WORKSPACE</span>{NAV.slice(0, 5).map(item => <button key={item.id} className={`nav-item ${page === item.id || item.id === "criteria" && criterionId ? "active" : ""}`} onClick={() => navigate(item.id)} aria-current={page === item.id ? "page" : undefined}><item.icon size={18} /><span>{item.label}</span>{item.id === "evidence" && <span className="nav-count">{state.documents.length}</span>}{item.id === "facts" && outstandingFacts.length > 0 && <span className="nav-dot" />}</button>)}</div><div className="nav-group"><span className="nav-label">YOUR APPLICATION</span>{NAV.slice(5).map(item => <button key={item.id} className={`nav-item ${page === item.id ? "active" : ""}`} onClick={() => navigate(item.id)} aria-current={page === item.id ? "page" : undefined}><item.icon size={18} /><span>{item.label}</span>{item.id === "draft" && <span className="tiny-label">DRAFT</span>}</button>)}</div></nav><div className="sidebar-bottom"><div className="attorney-card"><span className="attorney-icon"><UsersRound size={18} /></span><h3>A thoughtful second look.</h3><p>Learn about optional attorney review.</p><button className="link-button" onClick={() => navigate("settings")}>Explore your options<ChevronRight size={14} /></button></div><a className="nav-item" href="/"><ArrowLeft size={18} /><span>Home</span></a><button className={`nav-item ${page === "help" ? "active" : ""}`} onClick={() => navigate("help")}><CircleHelp size={18} /><span>Help & guidance</span></button><button className={`nav-item ${page === "settings" ? "active" : ""}`} onClick={() => navigate("settings")}><Settings2 size={18} /><span>Settings</span></button><a className="nav-item" href="/account"><UserRound size={18} /><span>Account management</span></a><div className="user-card"><span className="user-avatar">{user ? user.displayName[0].toUpperCase() : "M"}</span><div><strong>{user ? user.displayName : "Maya Chen"}</strong><small>{isSample ? "Exploring a sample case" : "Personal workspace"}</small></div>{user ? <form action="/api/auth/logout" method="post" target="_top"><button type="submit" className="icon-button" title="Sign out" aria-label="Sign out"><ChevronRight size={16} /></button></form> : <a href="/signup" title="Sign in" aria-label="Sign in"><ChevronRight size={16} /></a>}</div></div></aside>
-    <div className="app-body"><header className="topbar"><div className="breadcrumbs"><button className="icon-button mobile-only" aria-label="Open navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen(!mobileOpen)}><Menu size={21} /></button><span>My workspace</span><ChevronRight size={13} /><strong>{pageTitle}</strong></div><div className="topbar-actions"><span className={`save-state ${saveStatus}`} role="status" aria-live="polite">{saveStatus === "saving" || saveStatus === "loading" ? <Loader2 className="spin" size={14} /> : saveStatus === "saved" ? <CheckCheck size={15} /> : saveStatus === "error" || saveStatus === "conflict" ? <AlertCircle size={14} /> : <span className="dot" />}{saveStatus === "sample" ? "Sample · changes temporary" : saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "All changes saved" : saveStatus === "loading" ? "Loading your case…" : saveStatus === "conflict" ? "Save conflict" : "Save failed"}</span>{forceSample && user ? <a className="button secondary small" href="/workspace">Back to my case</a> : user ? <button className="button secondary small" disabled={saveStatus === "loading" || saveStatus === "saving"} onClick={isSample && !hasPersonalSnapshot ? () => setModal({ kind: "reset" }) : exploreSample}>{isSample ? hasPersonalSnapshot ? "Back to my case" : "Start my case" : "Explore sample"}<ChevronRight size={14} /></button> : <a className="button secondary small" href="/signup">Sign in to save<ChevronRight size={14} /></a>}</div></header>
-      <main className="workspace" id="main-content">{!isSample && caseLoaded && <section className="intake-summary" aria-label="Your visa intake"><span className="intake-summary-icon"><UserRound size={19} /></span><div className="intake-summary-copy"><strong>{state.intake?.completedAt ? 'Your intake: ' + (VISA_OPTIONS.find(option => option.id === state.intake?.answers.visaType)?.label ?? 'Immigration plans') : "Let’s get to know your immigration plans."}</strong><p>{state.intake?.completedAt ? 'Birthplace: ' + (state.intake.answers.birthCountry === 'OTHER' ? state.intake.answers.birthCountryOther : countryName(state.intake.answers.birthCountry)) + ' · Citizenship: ' + state.intake.answers.citizenships.map(countryName).join(', ') : "Tell us about your visa interest, country of birth, citizenships, and professional background."}</p>{state.intake?.completedAt && state.intake.answers.visaType !== 'eb1a' && <p>Your visa interest is saved in your intake. This workspace provides EB-1A preparation tools.</p>}</div><a className="button secondary small" href="/onboarding">{state.intake?.completedAt ? "View or update my intake" : state.intake || setupNeeded ? "Continue my intake" : "Complete my visa intake"}</a></section>}{!isSample && setupFocus && <section className="notice info" aria-label="Your preparation focus"><ListChecks size={20} /><div><strong>Your focus: {setupFocus.title}</strong><p>{setupFocus.description}</p><button className="link-button" onClick={() => navigate(setupFocus.page)}>{setupFocus.action}<ChevronRight size={14} /></button></div></section>}{(saveStatus === "error" || saveStatus === "conflict") && <div className="notice warning" role="alert"><AlertCircle size={20} /><div><strong>{saveStatus === "conflict" ? "Your local edits are preserved" : "Your changes need attention"}</strong><p>{saveMessage}</p><div className="inline-actions">{saveStatus === "error" && <button className="button secondary small" onClick={() => loaded.current ? void persist() : window.location.reload()}>Retry {caseLoaded ? "save" : "load"}</button>}<button className="link-button" onClick={downloadLocal}>Download local copy</button>{saveStatus === "conflict" && remoteConflict && <><button className="link-button" onClick={() => { if (!window.confirm("Replace the other saved version with the changes in this window? Download a local copy first if you need both versions.")) return; serverRevision.current = remoteConflict.revision; setRemoteConflict(null); setSaveStatus("saving"); setSaveMessage(""); void persist(); }}>Keep my local version</button><button className="link-button" onClick={() => { if (!window.confirm("Discard the changes in this window and use the saved version? Download a local copy first to preserve them.")) return; stateRef.current = remoteConflict.state; setState(remoteConflict.state); serverRevision.current = remoteConflict.revision; dirty.current = false; setRemoteConflict(null); setSaveStatus("saved"); }}>Use saved version</button></>}{saveMessage.includes("session") && <a className="link-button" target="_blank" rel="noreferrer" href="/signin">Sign in again<ExternalLink size={13} /></a>}</div></div></div>}{page === "dashboard" ? dashboard() : page === "profile" ? profileScreen() : page === "criteria" ? criteriaScreen() : page === "evidence" ? evidenceScreen() : page === "facts" ? factsScreen() : criterionId ? criterionScreen() : page === "composition" ? compositionScreen() : page === "draft" ? draftScreen() : page === "forms" ? formsScreen() : page === "review" ? reviewScreen() : settingsScreen()}<footer className="workspace-footer"><span>Thoughtfully prepared. Always your story.</span><span>Harness Law<small>·</small>{isSample ? "Fictional sample workspace" : "Private applicant workspace"}</span></footer></main>
+    <aside id="workspace-navigation" className="sidebar" aria-label="Primary navigation">
+      <button className="brand" onClick={() => navigate("dashboard")} aria-label="Harness Law overview" title="Overview">
+        <span className="sidebar-brand-full"><BrandLogo inverse /></span>
+        <span className="sidebar-brand-mark" aria-hidden="true"><BrandMark /></span>
+      </button>
+      <button className="icon-button sidebar-toggle" type="button" onClick={toggleSidebar} aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!sidebarCollapsed} aria-controls="workspace-navigation">{sidebarCollapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}<span>{sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}</span></button>
+      <section className="case-context" aria-labelledby="sidebar-case-label"><span className="case-context-icon" aria-hidden="true"><FolderOpen size={18} /></span><div className="case-context-copy"><span id="sidebar-case-label" className="case-context-label">CURRENT CASE</span><strong>{state.name || "My EB-1A preparation"}</strong><span className="case-context-status">{isSample ? "Fictional sample" : "Private workspace"}</span></div></section>
+      <nav>
+        <div className="nav-group"><span className="nav-label">YOUR WORKSPACE</span>{NAV.slice(0, 5).map(item => <button key={item.id} className={`nav-item ${page === item.id || item.id === "criteria" && criterionId ? "active" : ""}`} onClick={() => navigate(item.id)} aria-label={item.label} title={sidebarCollapsed ? item.label : undefined} aria-current={page === item.id ? "page" : undefined}><item.icon size={18} aria-hidden="true" /><span>{item.label}</span>{item.id === "evidence" && <span className="nav-count">{state.documents.length}</span>}{item.id === "facts" && outstandingFacts.length > 0 && <span className="nav-dot" />}</button>)}</div>
+        <div className="nav-group"><span className="nav-label">YOUR APPLICATION</span>{NAV.slice(5).map(item => <button key={item.id} className={`nav-item ${page === item.id ? "active" : ""}`} onClick={() => navigate(item.id)} aria-label={item.label} title={sidebarCollapsed ? item.label : undefined} aria-current={page === item.id ? "page" : undefined}><item.icon size={18} aria-hidden="true" /><span>{item.label}</span>{item.id === "draft" && <span className="tiny-label">DRAFT</span>}</button>)}</div>
+      </nav>
+      <div className="sidebar-bottom">
+        <section className="account-area" aria-label="Your account">
+          <span className="account-label">ACCOUNT</span>
+          <div className="account-identity" title={user?.displayName || "Not signed in"} aria-label={user ? `Signed in as ${user.displayName}` : "Not signed in"}><span className="user-avatar" aria-hidden="true">{user ? user.displayName.trim().split(/\s+/).map(part => part[0]).slice(0, 2).join("").toUpperCase() || "U" : <UserRound size={17} />}</span><span className="account-identity-copy"><small className="account-signed-label">{user ? "Signed in as" : "Guest access"}</small><strong>{user?.displayName || "Not signed in"}</strong></span></div>
+          <div className="account-links">
+            {canAccessAdmin && <a className="nav-item" href="/admin" aria-label="Admin portal" title={sidebarCollapsed ? "Admin portal" : undefined}><ShieldCheck size={18} aria-hidden="true" /><span>Admin portal</span></a>}
+            <a className="nav-item" href="/account" aria-label="Account management" title={sidebarCollapsed ? "Account management" : undefined}><UserRound size={18} aria-hidden="true" /><span>Account management</span></a>
+            <button className={`nav-item ${page === "settings" ? "active" : ""}`} onClick={() => navigate("settings")} aria-label="Settings" title={sidebarCollapsed ? "Settings" : undefined} aria-current={page === "settings" ? "page" : undefined}><Settings2 size={18} aria-hidden="true" /><span>Settings</span></button>
+            <button className={`nav-item ${page === "help" ? "active" : ""}`} onClick={() => navigate("help")} aria-label="Help & guidance" title={sidebarCollapsed ? "Help & guidance" : undefined} aria-current={page === "help" ? "page" : undefined}><CircleHelp size={18} aria-hidden="true" /><span>Help & guidance</span></button>
+            {forceSample && user ? <a className="nav-item" href="/workspace" aria-label="Back to my case" title={sidebarCollapsed ? "Back to my case" : undefined}><BriefcaseBusiness size={18} aria-hidden="true" /><span>Back to my case</span></a> : user ? <button className="nav-item" disabled={saveStatus === "loading" || saveStatus === "saving"} onClick={() => { setMobileOpen(false); if (isSample && !hasPersonalSnapshot) setModal({ kind: "reset" }); else exploreSample(); }} aria-label={isSample ? hasPersonalSnapshot ? "Back to my case" : "Start my case" : "Explore sample"} title={sidebarCollapsed ? isSample ? hasPersonalSnapshot ? "Back to my case" : "Start my case" : "Explore sample" : undefined}>{isSample ? <BriefcaseBusiness size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}<span>{isSample ? hasPersonalSnapshot ? "Back to my case" : "Start my case" : "Explore sample"}</span></button> : null}
+          </div>
+          {user ? <form action="/api/auth/logout" method="post" target="_top"><button type="submit" className="account-action" aria-label="Sign out" title="Sign out"><LogOut size={17} aria-hidden="true" /><span>Sign out</span></button></form> : <a className="account-action" href="/signup" aria-label="Sign in to save" title="Sign in to save"><LogIn size={17} aria-hidden="true" /><span>Sign in to save</span></a>}
+        </section>
+      </div>
+    </aside>
+    <div className="app-body"><header className="topbar"><div className="breadcrumbs"><button className="icon-button mobile-only" aria-label={mobileOpen ? "Close navigation" : "Open navigation"} aria-controls="workspace-navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen(!mobileOpen)}><Menu size={21} /></button><span>My workspace</span><ChevronRight size={13} /><strong>{pageTitle}</strong></div><div className="topbar-actions"><span className={`save-state ${saveStatus}`} role="status" aria-live="polite">{saveStatus === "saving" || saveStatus === "loading" ? <Loader2 className="spin" size={14} /> : saveStatus === "saved" ? <CheckCheck size={15} /> : saveStatus === "error" || saveStatus === "conflict" ? <AlertCircle size={14} /> : <span className="dot" />}{saveStatus === "sample" ? "Sample · changes temporary" : saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "All changes saved" : saveStatus === "loading" ? "Loading your case…" : saveStatus === "conflict" ? "Save conflict" : "Save failed"}</span></div></header>
+      <main className="workspace" id="main-content">{!isSample && caseLoaded && <section className="intake-summary" aria-label="Your visa intake"><span className="intake-summary-icon"><UserRound size={19} /></span><div className="intake-summary-copy"><strong>{state.intake?.completedAt ? 'Your intake: ' + (VISA_OPTIONS.find(option => option.id === state.intake?.answers.visaType)?.label ?? 'Immigration plans') : "Let’s get to know your immigration plans."}</strong><p>{state.intake?.completedAt ? 'Birthplace: ' + (state.intake.answers.birthCountry === 'OTHER' ? state.intake.answers.birthCountryOther : countryName(state.intake.answers.birthCountry)) + ' · Citizenship: ' + state.intake.answers.citizenships.map(countryName).join(', ') : "Tell us about your visa interest, country of birth, citizenships, and professional background."}</p>{state.intake?.completedAt && state.intake.answers.visaType !== 'eb1a' && <p>Your visa interest is saved in your intake. This workspace provides EB-1A preparation tools.</p>}</div><a className="button secondary small" href="/onboarding">{state.intake?.completedAt ? "View or update my intake" : state.intake ? "Continue my intake" : "Complete my visa intake"}</a></section>}{!isSample && setupFocus && <section className="notice info" aria-label="Your preparation focus"><ListChecks size={20} /><div><strong>Your focus: {setupFocus.title}</strong><p>{setupFocus.description}</p><button className="link-button" onClick={() => navigate(setupFocus.page)}>{setupFocus.action}<ChevronRight size={14} /></button></div></section>}{(saveStatus === "error" || saveStatus === "conflict") && <div className="notice warning" role="alert"><AlertCircle size={20} /><div><strong>{saveStatus === "conflict" ? "Your local edits are preserved" : "Your changes need attention"}</strong><p>{saveMessage}</p><div className="inline-actions">{saveStatus === "error" && <button className="button secondary small" onClick={() => loaded.current ? void persist() : window.location.reload()}>Retry {caseLoaded ? "save" : "load"}</button>}<button className="link-button" onClick={downloadLocal}>Download local copy</button>{saveStatus === "conflict" && remoteConflict && <><button className="link-button" onClick={() => { if (!window.confirm("Replace the other saved version with the changes in this window? Download a local copy first if you need both versions.")) return; serverRevision.current = remoteConflict.revision; dirty.current = true; changeVersion.current++; setRemoteConflict(null); setSaveStatus("saving"); setSaveMessage(""); void persist(); }}>Keep my local version</button><button className="link-button" onClick={() => { if (!window.confirm("Discard the changes in this window and use the saved version? Download a local copy first to preserve them.")) return; stateRef.current = remoteConflict.state; setState(remoteConflict.state); serverRevision.current = remoteConflict.revision; dirty.current = false; setRemoteConflict(null); setSaveStatus("saved"); }}>Use saved version</button></>}{saveMessage.includes("session") && <a className="link-button" target="_blank" rel="noreferrer" href="/signin">Sign in again<ExternalLink size={13} /></a>}</div></div></div>}{page === "dashboard" ? dashboard() : page === "profile" ? profileScreen() : page === "criteria" ? criteriaScreen() : page === "evidence" ? evidenceScreen() : page === "facts" ? factsScreen() : criterionId ? criterionScreen() : page === "composition" ? compositionScreen() : page === "draft" ? draftScreen() : page === "forms" ? formsScreen() : page === "review" ? reviewScreen() : page === "help" ? <WorkspaceHelp onNavigate={navigate} /> : settingsScreen()}<footer className="workspace-footer"><span>Thoughtfully prepared. Always your story.</span><span><BrandLogo className="footer-brand" /><small>·</small>{isSample ? "Fictional sample workspace" : "Private applicant workspace"}</span></footer></main>
     </div>
-    <input ref={fileInput} className="sr-only" type="file" multiple accept=".pdf,.docx,.jpg,.jpeg,.png,.txt" aria-label="Upload evidence files" onChange={e => { const target = replacementId.current; replacementId.current = null; void uploadFiles(Array.from(e.target.files || []), target); }} />
+    <input ref={node => { folderInput.current = node; node?.setAttribute("webkitdirectory", ""); }} className="sr-only" type="file" multiple aria-label="Upload evidence folder" onChange={event => void uploadFiles(Array.from(event.target.files || []), null, uploadFolderId.current, true)} />
+    <input ref={fileInput} className="sr-only" type="file" multiple accept=".pdf,.docx,.jpg,.jpeg,.png,.txt,.md,.markdown,.csv,.json" aria-label="Upload evidence files" onChange={e => { const target = replacementId.current; replacementId.current = null; void uploadFiles(Array.from(e.target.files || []), target, uploadFolderId.current); }} />
     {toast && <div className="toast" role="status" aria-live="polite"><CheckCircle2 size={18} /><span>{toast}</span><button className="icon-button" aria-label="Dismiss notification" onClick={() => setToast("")}><X size={16} /></button></div>}
     {modal && renderModal()}
-  </div>;
+  </div></EvidenceLibraryProvider>;
 
   function renderModal() {
     if (!modal) return null;
     if (modal.kind === "reset") return <Dialog title="Start a new personal case" onClose={() => setModal(null)}><p>This creates an empty personal workspace and replaces the current saved case. Download a local copy first if you want to keep the existing preparation record.</p><div className="notice warning"><AlertCircle size={19} /><p>Source references and drafts in the current case will be removed from this workspace. Uploaded files are not automatically deleted from private storage.</p></div><div className="modal-footer"><button className="button secondary" onClick={downloadLocal}>Download current case</button><button className="button ghost" onClick={() => setModal(null)}>Cancel</button><button className="button primary" onClick={resetCase}>Create empty personal case</button></div></Dialog>;
-    if (modal.kind === "consent") return <Dialog title="Your documents, your consent" onClose={() => setModal(null)}><p>Personal uploads are stored privately under your authenticated account. Evidence files are placed in quarantine; this release cannot perform evidence malware scanning, extraction, or AI processing and will not show quarantined contents. Local form import is separate: a file you choose there is read only in your browser and never added as evidence.</p><p>No documents are sent to an external AI provider. You can withdraw consent for future uploads in Settings. Withdrawal does not erase files already stored.</p><label className="consent-check"><input type="checkbox" checked={consentChecked} onChange={e => setConsentChecked(e.target.checked)} /><span>I consent to private storage of my uploaded evidence for this preparation workspace and understand the processing limitations.</span></label><div className="modal-footer"><button className="button ghost" onClick={() => setModal(null)}>Not now</button><button className="button primary" disabled={!consentChecked || isSample} onClick={() => { dispatch({ type: "consent", value: true }); setModal(null); notify("Consent recorded. Wait for All changes saved, then choose your files."); }}>Save consent</button></div>{isSample && <p className="field-help">Consent in this sample is fictional. Open a personal case to record your own.</p>}</Dialog>;
+    if (modal.kind === "consent") return <Dialog title="Your documents, your consent" onClose={() => setModal(null)}><p>Files you upload here or use to fill a form are stored privately in your Evidence library under this account. You can organize them into folders, download originals, and reuse supported documents to fill forms. Text for form suggestions is read in your browser. Server safety scanning, verified evidence extraction, and AI processing are not connected; local reading does not mark a document verified.</p><p>No documents are sent to an external AI provider. You can withdraw consent for future uploads in Settings. Withdrawal does not erase files already stored.</p><label className="consent-check"><input type="checkbox" checked={consentChecked} onChange={e => setConsentChecked(e.target.checked)} /><span>I consent to private storage of my uploaded evidence for this preparation workspace and understand the processing limitations.</span></label><div className="modal-footer"><button className="button ghost" onClick={() => setModal(null)}>Not now</button><button className="button primary" disabled={!consentChecked || isSample} onClick={() => { dispatch({ type: "consent", value: true }); setModal(null); notify("File storage consent recorded. Wait for All changes saved, then choose your files."); }}>Save consent</button></div>{isSample && <p className="field-help">Consent in this sample is fictional. Open a personal case to record your own.</p>}</Dialog>;
     if (modal.kind === "history") return <Dialog title="Paragraph version history" onClose={() => setModal(null)}><div className="history-entry"><Pill tone="green">Current · revision {modal.claim.revision}</Pill><p>{modal.claim.text}</p><p className="field-help">{readable(modal.claim.supportStatus)} · {readable(modal.claim.reviewStatus)}</p></div>{modal.claim.history.map((item, index) => <div className="history-entry" key={`${item.revision}-${index}`}><span className="eyebrow">REVISION {item.revision} · {dateLabel(item.at)}</span><p>{item.text}</p><small>{item.author}</small></div>)}{!modal.claim.history.length && <p className="field-help">No text revisions yet. Editing creates a new revision and resets support and human review.</p>}</Dialog>;
     if (modal.kind === "source") {
       const source = state.documents.find(d => d.id === modal.citation.sourceId);
@@ -363,7 +567,7 @@ export default function Workspace({ user, forceSample = false }: { user: User; f
     }
     const document = state.documents.find(d => d.id === modal.sourceId);
     if (!document) return <Dialog title="Source removed" onClose={() => setModal(null)}><p>This source is no longer part of the case. Dependent results require review.</p></Dialog>;
-    return <Dialog drawer title="Source details & associations" onClose={() => setModal(null)}><div className="source-metadata"><span className="file-icon"><FileText size={25} /></span><div><h3>{document.name}</h3><p>{document.exhibit} · Version {document.version} · {document.kind}</p></div></div><Pill tone={document.status === "ready" ? "green" : "amber"}>{document.sample ? "Fictional sample source" : readable(document.status)}</Pill>{document.status !== "ready" && <div className="notice warning"><ShieldCheck size={19} /><p>{document.issue || "Stored privately in quarantine. Safety scanning and extraction are not connected; file contents cannot be previewed or used as support."}</p></div>}<div className="section-heading"><div><h3>Criterion associations</h3><p>Confirm this exact version for each section.</p></div></div><div className="association-list">{CRITERIA.map(c => { const association = document.associations.find(a => a.criterion === c.id); return <label className="association-row" key={c.id}><span><strong>{c.id} · {c.shortTitle}</strong><small>{association ? `Association revision ${association.revision}` : "Not associated"}</small></span><select className="select" aria-label={`${c.id} association`} value={association?.status || "removed"} onChange={e => { if (association?.status === "confirmed" && e.target.value !== "confirmed") { const result = state.runs[c.id]?.result; const composition = state.composition?.selected.some(s => s.criterion === c.id) ? ` Composition v${state.composition.version} will also need review.` : ""; if (result && !window.confirm(`Changing this association will invalidate ${c.id} result revision ${result.revision}.${composition} The source remains stored for other criteria. Continue?`)) return; } dispatch({ type: "association", sourceId: document.id, criterion: c.id, status: e.target.value as "proposed" | "confirmed" | "removed" }); notify("Association updated. Dependent criterion results have been marked for review."); }}><option value="removed">Not included</option><option value="proposed">Proposed</option><option value="confirmed" disabled={document.status !== "ready"}>Confirmed</option></select></label>; })}</div>{document.status === "ready" && <details className="source-context"><summary>View fictional source text</summary><pre>{document.excerpt}</pre></details>}{!!document.previousVersions?.length && <details className="source-context"><summary>Previous source versions ({document.previousVersions.length})</summary>{document.previousVersions.map(v => <div className="history-entry" key={v.version}><strong>Version {v.version} · {v.name}</strong><p>{dateLabel(v.at)} · {readable(v.status)}</p></div>)}</details>}<div className="modal-footer">{document.sample ? <button className="button secondary small" onClick={() => { dispatch({ type: "replace_document", sourceId: document.id, document: { ...document, excerpt: `${document.excerpt}\nFictional sample version updated for review practice.` } }); notify("New sample source version created. Dependent results are stale; reconfirm its associations."); }}>Create sample version</button> : <button className="button secondary small" onClick={() => requestUpload(document.id)}><Upload size={14} />Replace file</button>}<button className="button danger small" onClick={() => { if (!window.confirm(`Remove ${document.name} from this case? All dependent sections will need review. Stored upload bytes are not deleted.`)) return; dispatch({ type: "remove_document", sourceId: document.id }); setModal(null); notify("Source removed from this case. Dependent results need repair."); }}><Trash2 size={14} />Remove from case</button></div><p className="field-help">Removing one association preserves the source and other associations. Replacing a source creates a new version and requires renewed confirmation.</p></Dialog>;
+    return <Dialog drawer title="Source details & associations" onClose={() => setModal(null)}><div className="source-metadata"><span className="file-icon"><FileText size={25} /></span><div><h3>{document.name}</h3><p>{document.exhibit} · Version {document.version} · {document.kind}</p></div></div><Pill tone={document.status === "ready" ? "green" : "amber"}>{document.sample ? "Fictional sample source" : readable(document.status)}</Pill>{document.status !== "ready" && <div className="notice warning"><ShieldCheck size={19} /><p>{document.issue || "Stored privately in quarantine. Safety scanning and extraction are not connected; file contents cannot be previewed or used as support."}</p></div>}<div className="section-heading"><div><h3>Criterion associations</h3><p>Confirm this exact version for each section.</p></div></div><div className="association-list">{CRITERIA.map(c => { const association = document.associations.find(a => a.criterion === c.id); return <label className="association-row" key={c.id}><span><strong>{c.id} · {c.shortTitle}</strong><small>{association ? `Association revision ${association.revision}` : "Not associated"}</small></span><select className="select" aria-label={`${c.id} association`} value={association?.status || "removed"} onChange={e => { if (association?.status === "confirmed" && e.target.value !== "confirmed") { const result = state.runs[c.id]?.result; const composition = state.composition?.selected.some(s => s.criterion === c.id) ? ` Composition v${state.composition.version} will also need review.` : ""; if (result && !window.confirm(`Changing this association will invalidate ${c.id} result revision ${result.revision}.${composition} The source remains stored for other criteria. Continue?`)) return; } dispatch({ type: "association", sourceId: document.id, criterion: c.id, status: e.target.value as "proposed" | "confirmed" | "removed" }); notify("Association updated. Dependent criterion results have been marked for review."); }}><option value="removed">Not included</option><option value="proposed">Proposed</option><option value="confirmed" disabled={document.status !== "ready"}>Confirmed</option></select></label>; })}</div>{document.status === "ready" && <details className="source-context"><summary>View fictional source text</summary><pre>{document.excerpt}</pre></details>}{!!document.previousVersions?.length && <details className="source-context"><summary>Previous source versions ({document.previousVersions.length})</summary>{document.previousVersions.map(v => <div className="history-entry" key={v.version}><strong>Version {v.version} · {v.name}</strong><p>{dateLabel(v.at)} · {readable(v.status)}</p></div>)}</details>}<div className="modal-footer">{document.sample ? <button className="button secondary small" onClick={() => { dispatch({ type: "replace_document", sourceId: document.id, document: { ...document, excerpt: `${document.excerpt}\nFictional sample version updated for review practice.` } }); notify("New sample source version created. Dependent results are stale; reconfirm its associations."); }}>Create sample version</button> : <button className="button secondary small" onClick={() => requestUpload(document.id)}><Upload size={14} />Replace file</button>}<button className="button danger small" disabled={uploading || deleting} onClick={async () => { if (!window.confirm(`Delete ${document.name}${document.sample ? " from this fictional sample" : " and its stored versions"}? Dependent sections will need review. This cannot be undone.`)) return; try { await deleteEvidence({ kind: "file", id: document.id }); setModal(null); } catch (error) { notify(error instanceof Error ? error.message : "Deletion failed. Please retry."); } }}><Trash2 size={14} />{deleting ? "Deleting…" : "Delete file"}</button></div><p className="field-help">Removing one association preserves the source and other associations. Replacing a source creates a new version and requires renewed confirmation.</p></Dialog>;
   }
 }
 

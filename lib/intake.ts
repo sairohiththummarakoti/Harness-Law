@@ -9,7 +9,7 @@ export interface IntakeAnswers {
   field: string; role: string; criteria: string[]; criteriaUnsure: boolean;
   majorAward: 'yes' | 'no' | 'unsure' | ''; notes: string;
 }
-export interface CaseIntake { version: 1; step: IntakeStep; answers: IntakeAnswers; completedAt?: string }
+export interface CaseIntake { version: 1; step: IntakeStep; answers: IntakeAnswers; completedAt?: string; firstCompletedAt?: string }
 
 export const INTAKE_STEP_FIELDS: Record<IntakeStep, readonly (keyof IntakeAnswers)[]> = {
   basics: ['fullName', 'phone', 'helpFor'], visa: ['visaType'], birth: ['birthCountry', 'birthCountryOther'],
@@ -92,6 +92,39 @@ export function intakeCompletionError(answers: IntakeAnswers): string | null {
   return null;
 }
 
+/** A finished intake stays finished historically even while a later edit needs another answer. */
+function firstCompletion(state: CaseState): string | undefined {
+  return state.intake?.firstCompletedAt ?? state.intake?.completedAt;
+}
+
+function syncIntakeFields(state: CaseState, merged: IntakeAnswers, editedFields?: readonly (keyof IntakeAnswers)[]): CaseState {
+  let next = structuredClone(state);
+  const sync = (key: keyof IntakeAnswers) => !editedFields || editedFields.includes(key);
+  const profilePatch: Partial<CaseState['profile']> = {};
+  if (sync('fullName') && merged.fullName !== next.profile.fullName) profilePatch.fullName = merged.fullName;
+  if (sync('phone') && merged.phone !== next.profile.phone) profilePatch.phone = merged.phone;
+  if (Object.keys(profilePatch).length) next = applyAction(next, { type: 'profile', patch: { ...profilePatch, confirmed: false } });
+  const professionalPatch: Partial<CaseState['professional']> = {};
+  if (sync('field') && merged.field !== next.professional.field) professionalPatch.field = merged.field;
+  if (sync('role') && merged.role !== next.professional.role) professionalPatch.role = merged.role;
+  if (Object.keys(professionalPatch).length) next = applyAction(next, { type: 'professional', patch: professionalPatch });
+  return next;
+}
+
+function finishIntake(state: CaseState, merged: IntakeAnswers, editedFields?: readonly (keyof IntakeAnswers)[]): CaseState {
+  let next = syncIntakeFields(state, merged, editedFields);
+  // Only the first completed intake may initialize an empty criterion selection.
+  // Later edits must respect a deliberate decision to remove every criterion.
+  const firstCompletedAt = firstCompletion(state);
+  if (merged.visaType === 'eb1a' && !firstCompletedAt && state.criteria.length === 0) {
+    for (const criterion of merged.criteria) next = applyAction(next, { type: 'toggle_criterion', criterion });
+  }
+  const completedAt = new Date().toISOString();
+  next.intake = { version: 1, step: 'review', answers: structuredClone(merged), completedAt, firstCompletedAt: firstCompletedAt ?? completedAt };
+  next.updatedAt = completedAt;
+  return next;
+}
+
 /** The caller saves this result against the revision it loaded. Never overwrites unrelated case content. */
 export function applyIntakeStep(state: CaseState, step: IntakeStep, answers: IntakeAnswers): CaseState {
   if (state.mode === 'sample') throw new Error('Sign in to save a personal intake.');
@@ -108,21 +141,28 @@ export function applyIntakeStep(state: CaseState, step: IntakeStep, answers: Int
   if (error) throw new Error(error);
   const steps = getIntakeSteps(merged.visaType);
   const nextStep = steps[Math.min(steps.indexOf(step) + 1, steps.length - 1)];
-  let next = structuredClone(state);
-  next.intake = { version: 1, step: nextStep, answers: merged };
-  if (step === 'review') {
-    const profileChanged = merged.fullName !== next.profile.fullName || merged.phone !== next.profile.phone;
-    if (profileChanged) next = applyAction(next, { type: 'profile', patch: { fullName: merged.fullName, phone: merged.phone, confirmed: false } });
-    if (merged.field !== next.professional.field || merged.role !== next.professional.role) {
-      next = applyAction(next, { type: 'professional', patch: { field: merged.field, role: merged.role } });
-    }
-    // A first intake can choose a starting point for an empty preparation workspace.
-    // Existing selections remain authoritative, and choosing a criterion never assesses it.
-    if (merged.visaType === 'eb1a' && !state.intake?.completedAt && state.criteria.length === 0) {
-      for (const criterion of merged.criteria) next = applyAction(next, { type: 'toggle_criterion', criterion });
-    }
-    next.intake = { version: 1, step: 'review', answers: merged, completedAt: new Date().toISOString() };
-  }
+  if (step === 'review') return finishIntake(state, merged);
+  const next = structuredClone(state);
+  const firstCompletedAt = firstCompletion(state);
+  next.intake = { version: 1, step: nextStep, answers: merged, ...(firstCompletedAt ? { firstCompletedAt } : {}) };
   next.updatedAt = new Date().toISOString();
   return next;
+}
+
+/** Save one correction to a previously completed intake without replaying valid questions. */
+export function applyIntakeEdit(state: CaseState, step: IntakeStep, answers: IntakeAnswers): CaseState {
+  if (!firstCompletion(state)) throw new Error('Complete your first intake before editing saved answers.');
+  const current = intakeAnswersFromCase(state);
+  const next = applyIntakeStep(state, step, answers);
+  const merged = next.intake!.answers;
+  const changedFields = INTAKE_STEP_FIELDS[step].filter(key => JSON.stringify(current[key]) !== JSON.stringify(merged[key]));
+  const invalidStep = getIntakeSteps(merged.visaType).find(item => intakeStepError(merged, item));
+  if (invalidStep) {
+    const saved = syncIntakeFields(next, merged, changedFields);
+    saved.intake = { version: 1, step: invalidStep, answers: merged, firstCompletedAt: firstCompletion(state) };
+    return saved;
+  }
+  // Use the original state so an unrelated correction cannot overwrite newer
+  // profile edits with older answers from the intake summary.
+  return finishIntake(state, merged, changedFields);
 }
