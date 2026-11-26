@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createEmptyCase, createSampleCase } from '../lib/model.ts';
-import { applyIntakeStep, getIntakeSteps, intakeAnswersFromCase, mergeIntakeStepAnswers, type IntakeAnswers } from '../lib/intake.ts';
+import { applyAction, createEmptyCase, createSampleCase } from '../lib/model.ts';
+import { applyIntakeEdit, applyIntakeStep, getIntakeSteps, intakeAnswersFromCase, mergeIntakeStepAnswers, type IntakeAnswers } from '../lib/intake.ts';
 import { COUNTRIES, countryName } from '../lib/countries.ts';
 import { caseSchema } from '../lib/validation.ts';
 import { getOnboardingRoute } from '../lib/onboarding.ts';
@@ -163,4 +163,110 @@ test('intake routing resumes incomplete answers without overriding sample or leg
   assert.equal(getOnboardingRoute(sample), 'workspace');
   assert.throws(() => applyIntakeStep(editing, 'review', answers('e1')), /earlier/);
   assert.throws(() => applyIntakeStep(editing, 'criteria', answers()), /earlier/);
+});
+
+test('completion provenance survives a legacy intake edit and never reseeds removed criteria', () => {
+  let state = throughReview();
+  const originalCompletion = state.intake!.completedAt;
+  delete state.intake!.firstCompletedAt; // A case saved before completion provenance existed.
+  for (const criterion of [...state.criteria]) state = applyAction(state, { type: 'toggle_criterion', criterion });
+  state = applyIntakeStep(state, 'basics', { ...intakeAnswersFromCase(state), fullName: 'Corrected Applicant' });
+  assert.equal(state.intake!.firstCompletedAt, originalCompletion);
+  assert.equal(state.intake!.completedAt, undefined);
+  assert.ok(caseSchema.safeParse(state).success);
+  for (const step of getIntakeSteps('eb1a').slice(1)) state = applyIntakeStep(state, step, intakeAnswersFromCase(state));
+  assert.deepEqual(state.criteria, []);
+  assert.equal(state.intake!.firstCompletedAt, originalCompletion);
+  assert.equal(state.profile.fullName, 'Corrected Applicant');
+});
+
+test('a valid saved-intake correction completes immediately and preserves newer workspace fields', () => {
+  let state = throughReview();
+  state = applyAction(state, { type: 'profile', patch: { phone: '+1 555 999 9999' } });
+  state = applyAction(state, { type: 'professional', patch: { role: 'Newer workspace role', field: 'Newer workspace field' } });
+  const before = structuredClone(state);
+  const changed = applyIntakeEdit(state, 'basics', { ...answers(), fullName: 'Corrected Applicant', role: 'Stale draft role', field: 'Stale draft field' });
+  assert.equal(changed.intake!.step, 'review');
+  assert.ok(changed.intake!.completedAt);
+  assert.equal(changed.intake!.firstCompletedAt, state.intake!.firstCompletedAt);
+  assert.equal(changed.profile.fullName, 'Corrected Applicant');
+  assert.equal(changed.profile.phone, '+1 555 999 9999');
+  assert.deepEqual(changed.professional, state.professional);
+  assert.equal(changed.intake!.answers.role, state.intake!.answers.role);
+  assert.deepEqual(changed.documents, state.documents);
+  assert.deepEqual(changed.criteria, state.criteria);
+  assert.equal(changed.consent, state.consent);
+  assert.ok(caseSchema.safeParse(changed).success);
+  assert.deepEqual(state, before);
+});
+
+test('changing a visa asks only newly required answers and keeps the existing workspace selection', () => {
+  const completed = throughReview(answers('e1'));
+  const changed = applyIntakeEdit(completed, 'visa', { ...answers(), visaType: 'eb1a' });
+  assert.equal(changed.intake!.step, 'criteria');
+  assert.equal(changed.intake!.completedAt, undefined);
+  assert.equal(changed.intake!.firstCompletedAt, completed.intake!.firstCompletedAt);
+  for (const key of ['birthCountry', 'citizenships', 'field', 'role', 'notes'] as const) assert.deepEqual(changed.intake!.answers[key], completed.intake!.answers[key], key);
+  assert.ok(caseSchema.safeParse(changed).success);
+  const finished = applyIntakeEdit(changed, 'criteria', { ...intakeAnswersFromCase(changed), criteria: ['C04'], majorAward: 'no' });
+  assert.equal(finished.intake!.step, 'review');
+  assert.ok(finished.intake!.completedAt);
+  assert.deepEqual(finished.intake!.answers.criteria, ['C04']);
+  assert.deepEqual(finished.criteria, []);
+  assert.ok(caseSchema.safeParse(finished).success);
+});
+
+test('a visa edit away from EB-1A completes without replaying saved general questions', () => {
+  const state = throughReview();
+  const changed = applyIntakeEdit(state, 'visa', { ...answers(), visaType: 'e1' });
+  assert.equal(changed.intake!.step, 'review');
+  assert.ok(changed.intake!.completedAt);
+  assert.deepEqual(changed.intake!.answers.criteria, []);
+  assert.deepEqual(changed.intake!.answers.citizenships, state.intake!.answers.citizenships);
+  assert.deepEqual(changed.criteria, state.criteria);
+  assert.ok(caseSchema.safeParse(changed).success);
+});
+
+test('explicit profile edits sync while a changed visa still needs criteria answers', () => {
+  const completed = throughReview(answers('e1'));
+  let state = applyIntakeEdit(completed, 'visa', { ...intakeAnswersFromCase(completed), visaType: 'eb1a' });
+  state = applyIntakeEdit(state, 'basics', { ...intakeAnswersFromCase(state), fullName: 'Corrected Applicant' });
+  assert.equal(state.profile.fullName, 'Corrected Applicant');
+  assert.equal(state.intake!.step, 'criteria');
+  assert.equal(state.intake!.completedAt, undefined);
+  state = applyIntakeEdit(state, 'background', { ...intakeAnswersFromCase(state), role: 'Updated Researcher' });
+  assert.equal(state.professional.role, 'Updated Researcher');
+  assert.equal(state.intake!.step, 'criteria');
+  assert.ok(caseSchema.safeParse(state).success);
+  const finished = applyIntakeEdit(state, 'criteria', { ...intakeAnswersFromCase(state), criteria: ['C04'], majorAward: 'no' });
+  assert.equal(finished.profile.fullName, 'Corrected Applicant');
+  assert.equal(finished.professional.role, 'Updated Researcher');
+  assert.equal(finished.intake!.firstCompletedAt, completed.intake!.firstCompletedAt);
+  assert.ok(finished.intake!.completedAt);
+  assert.deepEqual(finished.criteria, completed.criteria);
+  assert.ok(caseSchema.safeParse(finished).success);
+});
+
+test('saved-intake edits merge only displayed fields onto the latest accepted answers', () => {
+  const state = throughReview();
+  state.intake!.answers.phone = '+1 555 777 7777';
+  state.intake!.answers.notes = 'Latest saved context';
+  const changed = applyIntakeEdit(state, 'birth', { ...answers(), birthCountry: 'NZ', fullName: 'Stale draft name', phone: 'Stale draft phone', notes: 'Stale draft notes' });
+  assert.equal(changed.intake!.answers.birthCountry, 'NZ');
+  assert.equal(changed.intake!.answers.fullName, state.intake!.answers.fullName);
+  assert.equal(changed.intake!.answers.phone, state.intake!.answers.phone);
+  assert.equal(changed.intake!.answers.notes, 'Latest saved context');
+  assert.deepEqual(changed.profile, state.profile);
+  assert.deepEqual(changed.professional, state.professional);
+});
+
+test('direct edits cannot bypass first-intake progression or active-question validation', () => {
+  assert.throws(() => applyIntakeEdit(createEmptyCase(), 'review', answers()), /first intake/);
+  const started = applyIntakeStep(createEmptyCase(), 'basics', answers());
+  assert.throws(() => applyIntakeEdit(started, 'review', answers()), /first intake/);
+  const complete = throughReview();
+  assert.throws(() => applyIntakeEdit(complete, 'basics', { ...answers(), fullName: ' ' }), /full name/);
+  const changed = applyIntakeEdit(throughReview(answers('e1')), 'visa', answers());
+  assert.throws(() => applyIntakeEdit(changed, 'review', answers()), /earlier/);
+  assert.equal(caseSchema.safeParse({ ...complete, intake: { ...complete.intake, firstCompletedAt: 'invalid-date' } }).success, false);
 });

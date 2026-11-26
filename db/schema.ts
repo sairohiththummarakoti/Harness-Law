@@ -8,6 +8,12 @@ export const cases=sqliteTable('cases',{
   updatedAt:text('updated_at').notNull(),
 });
 
+export const accountIntakeEntries=sqliteTable('account_intake_entries',{
+  ownerId:text('owner_id').primaryKey(),
+  firstSeenAt:text('first_seen_at').notNull(),
+  firstShownAt:text('first_shown_at'),
+});
+
 export const evidenceObjects=sqliteTable('evidence_objects',{
   id:text('id').primaryKey(),
   ownerId:text('owner_id').notNull(),

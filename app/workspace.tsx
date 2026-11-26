@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowDownToLine, ArrowLeft, Award, BookOpen, BriefcaseBusiness, Check, CheckCheck, CheckCircle2, ChevronRight, Circle, CircleHelp, Clock3, ExternalLink, FileCheck2, FileText, Fingerprint, FolderOpen, History, LayoutDashboard, ListChecks, Loader2, LockKeyhole, LogIn, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, Settings2, ShieldCheck, Upload, UserRound, UsersRound, X, AlertCircle, Link2, Trash2, Undo2, UnlockKeyhole, Scale, Quote, Eye, PencilLine } from "lucide-react";
 import { CRITERIA, applyAction, createEmptyCase, createSampleCase, criterionReady, currentResult, getBlockers, runBlockers, type CaseState, type Claim, type Evidence, type Action } from "@/lib/model";
-import { getOnboardingNextStep, getOnboardingRoute } from "@/lib/onboarding";
+import { getOnboardingNextStep } from "@/lib/onboarding";
 import { VISA_OPTIONS } from "@/lib/intake-catalog";
 import { countryName } from "@/lib/countries";
 import { FileFormImport } from "@/components/file-form-import";
@@ -85,7 +85,7 @@ function FactCard({ fact, document, dispatch, openSource, notify, importDisabled
   return <article className="panel fact-card"><div className="panel-header"><h3>{fact.label}</h3><Pill tone={fact.status === "confirmed" || fact.status === "corrected" ? "green" : "amber"}>{readable(fact.status)}</Pill></div><div className="panel-body"><div className="field-grid"><div><span className="field-label">Source value</span><p className="fact-value">{fact.originalValue}</p></div><div><span className="field-label">Current value</span><p className="fact-value">{fact.value}</p></div></div><button className="citation fact-source" disabled={!document} onClick={() => document && openSource({ sourceId: document.id, sourceVersion: document.version, page: fact.page, quote: document.excerpt }, fact.label)}><FileText size={14} />{document?.name || "Source unavailable"} · p. {fact.page}</button><p className="field-help">{fact.reason || "Compare the source and confirm the fact before relying on it."}</p>{correcting && <><FileFormImport fields={factImportFields(fact.label)} values={{ value, reason }} contextKey={`${importContext}:${fact.id}:${fact.value}`} disabled={importDisabled} saveNote="Apply fills your correction draft. Compare it with the original source and use Save correction." onApply={patch => { if (typeof patch.value === "string") setValue(patch.value); if (typeof patch.reason === "string") setReason(patch.reason); }} /><div className="field-grid"><Field label="Corrected value" value={value} onChange={setValue} /><Field label="Reason for correction" value={reason} onChange={setReason} hint="The original source value remains in the record." /></div></>}<div className="fact-actions">{correcting ? <><button className="button primary small" disabled={!value.trim() || !reason.trim()} onClick={() => { dispatch({ type: "fact", id: fact.id, value, reason, status: "corrected" }); setCorrecting(false); notify("Correction saved with its reason. Dependent sections need renewed review."); }}>Save correction</button><button className="button ghost small" onClick={() => setCorrecting(false)}>Cancel</button></> : <><button className="button secondary small" onClick={() => { dispatch({ type: "fact", id: fact.id, status: "confirmed" }); notify("Fact confirmed."); }}><Check size={14} />Confirm</button><button className="button ghost small" onClick={() => { setValue(fact.value); setCorrecting(true); }}>Correct value</button><button className="button ghost small" onClick={() => { dispatch({ type: "fact", id: fact.id, status: "unresolved" }); notify("Fact left unresolved for later review."); }}>Leave unresolved</button><button className="link-button" onClick={() => { dispatch({ type: "fact", id: fact.id, status: "issue", reason: "Applicant reported a source inconsistency. Review the original document." }); notify("Source issue recorded for review."); }}>Report issue</button></>}</div></div></article>;
 }
 
-export default function Workspace({ user, forceSample = false, canAccessAdmin = false }: { user: User; forceSample?: boolean; canAccessAdmin?: boolean }) {
+export default function Workspace({ user, forceSample = false, canAccessAdmin = false, showOverview = false }: { user: User; forceSample?: boolean; canAccessAdmin?: boolean; showOverview?: boolean }) {
   const [state, setState] = useState<CaseState>(() => user && !forceSample ? createEmptyCase() : createSampleCase());
   const [saveStatus, setSaveStatus] = useState<SaveStatus>(user && !forceSample ? "loading" : "sample");
   const [saveMessage, setSaveMessage] = useState("");
@@ -153,14 +153,15 @@ export default function Workspace({ user, forceSample = false, canAccessAdmin = 
       const result = await response.json() as { state: CaseState; revision: number };
       if (!active) return;
       serverRevision.current = result.revision;
-      stateRef.current = result.state;
-      setState(result.state);
+      const openedState = showOverview ? { ...result.state, lastPage: "dashboard" } : result.state;
+      stateRef.current = openedState;
+      setState(openedState);
       loaded.current = true;
       setCaseLoaded(true);
       setSaveStatus("saved");
     }).catch(error => { if (active) { setSaveStatus("error"); setSaveMessage(error.message); } });
     return () => { active = false; };
-  }, [user, forceSample]);
+  }, [user, forceSample, showOverview]);
 
   const persist = useCallback(async () => {
     if (!user || forceSample || !loaded.current || saving.current || !dirty.current || stateRef.current.mode === "sample") return;
@@ -366,7 +367,6 @@ export default function Workspace({ user, forceSample = false, canAccessAdmin = 
   const importDisabled = !caseLoaded || uploading || deleting || saveStatus === "saving" || saveStatus === "conflict" || saveStatus === "error";
   const importContext = `${user?.userId ?? "guest"}:${state.id}:${state.mode}:${page}`;
   const importSaveNote = isSample ? "Applied answers stay in this fictional sample session." : "Applied answers use the usual case autosave. Check the save status before leaving.";
-  const setupNeeded = !isSample && caseLoaded && getOnboardingRoute(state) === 'setup';
   const setupFocus = !state.intake && state.onboarding?.completedAt ? getOnboardingNextStep(state.onboarding.goal) : null;
   const firstName = state.profile.preferredName || state.profile.fullName.split(" ")[0] || user?.displayName.split(" ")[0] || "there";
   const criterionId = page.startsWith("criterion:") ? page.split(":")[1] : null;
@@ -389,14 +389,14 @@ export default function Workspace({ user, forceSample = false, canAccessAdmin = 
     const birthplace = intake?.answers.birthCountry === "OTHER" ? intake.answers.birthCountryOther : countryName(intake?.answers.birthCountry ?? "");
     const citizenships = intake?.answers.citizenships.map(countryName).filter(Boolean).join(", ");
     return <section className="overview-intake" aria-labelledby="overview-intake-title">
-      <div className="overview-intake-heading"><span className="overview-intake-symbol" aria-hidden="true"><FolderOpen size={20} /></span><h2 id="overview-intake-title">Your intake</h2><span className="overview-intake-state">{completed ? "Intake complete" : intake || setupNeeded ? "In progress" : "Get started"}</span></div>
+      <div className="overview-intake-heading"><span className="overview-intake-symbol" aria-hidden="true"><FolderOpen size={20} /></span><h2 id="overview-intake-title">Your intake</h2><span className="overview-intake-state">{completed ? "Intake complete" : intake ? "In progress" : "Not started"}</span></div>
       <p className="overview-intake-visa">{completed ? visa : "A little about you."}</p>
       {completed ? <dl className="overview-intake-facts">
         <div><dt>Country of birth</dt><dd>{birthplace || "Not provided"}</dd></div>
         <div><dt>Citizenship</dt><dd>{citizenships || "Not provided"}</dd></div>
-      </dl> : <p className="overview-intake-description">{intake || setupNeeded ? "Continue your intake to bring your background and immigration plans into focus." : "Tell us about your background and the immigration path you have in mind."}</p>}
+      </dl> : <p className="overview-intake-description">{intake ? "Your saved answers are here whenever you’re ready to continue." : "Add your background and immigration plans when you’re ready. You can update them here at any time."}</p>}
       {completed && intake?.answers.visaType !== "eb1a" && <p className="overview-intake-note">Your visa interest is recorded. This workspace provides EB-1A preparation tools.</p>}
-      <a className="overview-intake-edit" href="/onboarding"><PencilLine size={16} aria-hidden="true" />{completed ? "View or update intake" : intake || setupNeeded ? "Continue my intake" : "Start my intake"}</a>
+      <a className="overview-intake-edit" href="/onboarding?edit=1"><PencilLine size={16} aria-hidden="true" />{completed ? "Edit intake" : intake ? "Continue intake" : "Start intake"}</a>
     </section>;
   }
 

@@ -30,7 +30,7 @@ export const intakeSchema=z.object({
     citizenships:z.array(z.string().refine(isCitizenshipCode,'Choose a valid citizenship.')).max(20),
     field:short,role:short,criteria:z.array(criterion).max(10),criteriaUnsure:z.boolean(),
     majorAward:z.enum(['','yes','no','unsure']),notes:z.string().max(3000),
-  }).strict(),completedAt:timestamp.optional(),
+  }).strict(),completedAt:timestamp.optional(),firstCompletedAt:timestamp.optional(),
 }).strict().superRefine((value,context)=>{
   const issue=(message:string)=>context.addIssue({code:z.ZodIssueCode.custom,message});
   const answers=value.answers;

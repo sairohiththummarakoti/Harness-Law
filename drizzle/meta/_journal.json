@@ -36,6 +36,13 @@
       "when": 1795669360507,
       "tag": "0004_dear_stingray",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1795706535115,
+      "tag": "0005_fresh_wild_pack",
+      "breakpoints": true
     }
   ]
 }

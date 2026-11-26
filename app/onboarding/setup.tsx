@@ -1,16 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { Check, CheckCircle2, ChevronDown, Loader2, Search, ShieldCheck, X } from "lucide-react";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type MouseEvent } from "react";
+import { ArrowLeft, ArrowRight, Check, ChevronDown, FileCheck2, FileText, FolderOpen, Loader2, Search, ShieldCheck, UserRound, X } from "lucide-react";
 import { CRITERIA, GUIDANCE_URL, type CaseState } from "@/lib/model";
-import { applyIntakeStep, getIntakeSteps, intakeAnswersFromCase, mergeIntakeStepAnswers, INTAKE_STEP_FIELDS, type IntakeAnswers, type IntakeStep } from "@/lib/intake";
+import { applyIntakeEdit, applyIntakeStep, getIntakeSteps, intakeAnswersFromCase, mergeIntakeStepAnswers, INTAKE_STEP_FIELDS, type IntakeAnswers, type IntakeStep } from "@/lib/intake";
 import { INTAKE_STEP_LABELS, VISA_OPTIONS } from "@/lib/intake-catalog";
 import { BIRTH_COUNTRIES, CITIZENSHIP_OPTIONS, countryName } from "@/lib/countries";
 import { requestCase } from "@/lib/case-request";
 import { FileFormImport } from "@/components/file-form-import";
 import { applyIntakeImportPatch, intakeImportFields } from "@/lib/form-import-fields";
 import styles from "./setup.module.css";
-import { BrandLogo } from "@/components/brand-logo";
+import { BrandLogo, BrandMark } from "@/components/brand-logo";
 import { EvidenceLibraryProvider } from "@/components/evidence-library-context";
 import { EvidenceRequestError, uploadEvidenceFile, readEvidenceFile } from "@/lib/evidence-client";
 
@@ -80,7 +80,7 @@ function summaryRows(answers: IntakeAnswers): { step: IntakeStep; label: string;
   return rows;
 }
 
-export default function Onboarding({ initialName, initialEmail, signInPath, accountId }: { initialName: string; initialEmail: string; signInPath: string; accountId: string }) {
+export default function Onboarding({ initialName, initialEmail, signInPath, accountId, editMode = false }: { initialName: string; initialEmail: string; signInPath: string; accountId: string; editMode?: boolean }) {
   const [caseState, setCaseState] = useState<CaseState | null>(null);
   const [answers, setAnswers] = useState<IntakeAnswers>({ ...blankAnswers, fullName: initialName });
   const [step, setStep] = useState<IntakeStep>("basics");
@@ -138,6 +138,10 @@ export default function Onboarding({ initialName, initialEmail, signInPath, acco
     window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn);
   }, []);
 
+  function leaveIntake(event: MouseEvent<HTMLAnchorElement>) {
+    if (saveInFlight.current) event.preventDefault();
+    // The beforeunload guard protects unsaved answers; saved steps remain in the account.
+  }
   function patch<K extends keyof IntakeAnswers>(key: K, value: IntakeAnswers[K]) { setAnswers(current => ({ ...current, [key]: value })); }
   function chooseVisa(value: IntakeAnswers["visaType"]) {
     setAnswers(current => ({ ...current, visaType: value, ...(value !== "eb1a" ? { criteria: [], criteriaUnsure: false, majorAward: "" as const } : {}) }));
@@ -171,7 +175,8 @@ export default function Onboarding({ initialName, initialEmail, signInPath, acco
     saveInFlight.current = true; setSaving(true); setError(""); setSessionExpired(false);
     const previousSaved = savedAnswers.current;
     try {
-      const updated = applyIntakeStep(base, step, answers);
+      const updatingCompletedIntake = !!(base.intake?.completedAt || base.intake?.firstCompletedAt);
+      const updated = updatingCompletedIntake ? applyIntakeEdit(base, step, answers) : applyIntakeStep(base, step, answers);
       const response = await requestCase({ method: "PUT", headers: { "Content-Type": "application/json", "X-Harness-Account": accountId }, body: JSON.stringify({ state: updated, expectedRevision: base.revision }) });
       const result = response.data;
       if (response.status === 409) {
@@ -199,7 +204,14 @@ export default function Onboarding({ initialName, initialEmail, signInPath, acco
         return merged;
       });
       setCompleted(!!acceptedState.intake?.completedAt);
-      if (step !== "review") {
+      if (acceptedState.intake?.completedAt && (updatingCompletedIntake || step === "review")) {
+        currentAnswers.current = accepted; intakeComplete.current = true; saveInFlight.current = false;
+        window.location.assign("/workspace?view=overview"); return;
+      } else if (updatingCompletedIntake) {
+        setStep(acceptedState.intake?.step ?? "review");
+        currentAnswers.current = accepted;
+        setAnswers(accepted);
+      } else if (step !== "review") {
         const sequence = getIntakeSteps(accepted.visaType);
         setStep(sequence[Math.min(sequence.indexOf(step) + 1, sequence.length - 1)]);
       }
@@ -271,25 +283,20 @@ export default function Onboarding({ initialName, initialEmail, signInPath, acco
   const hasDraftChanges = !!savedAnswers.current && !equal(answers, savedAnswers.current);
   const savedReview = caseState ? answersFromCase(caseState) : answers;
   const activeRows = summaryRows(step === "review" ? { ...savedReview, notes: answers.notes } : answers);
-  const selectedCriteria = CRITERIA.filter(criterion => answers.criteria.includes(criterion.id));
+  const updatingCompletedIntake = !!(caseState?.intake?.completedAt || caseState?.intake?.firstCompletedAt);
   const isEB1A = answers.visaType === "eb1a";
 
   return <EvidenceLibraryProvider value={{ documents: caseState?.documents ?? [], folders: caseState?.folders ?? [], mode: "personal", caseId: caseState?.id ?? "loading", accountId, consent: !!caseState?.consent, disabled: loading || blocked || sessionExpired, upload: retainIntakeFile, read: (document, signal) => readEvidenceFile(document, accountId, caseState?.id ?? "", signal), grantConsent: grantFileConsent }}><div className={styles.setup}>
     <a className={styles.skipLink} href="#intake-form">Skip to intake</a>
-    <header className={styles.header}>
-      <a className={styles.brand} href="/" aria-label="Harness Law home"><BrandLogo inverse /></a>
-      <span className={styles.headerNote}><ShieldCheck size={17} aria-hidden="true" /><span>Private intake</span></span>
-    </header>
     <main className={styles.main}>
-      <aside className={styles.journey} aria-label="Your intake journey">
-        <img className={styles.journeyArtwork} src="/images/harness-horizon.webp" alt="" width="1254" height="1254" />
-        <div className={styles.journeyIntro}><p className={styles.journeyEyebrow}>YOUR NEXT CHAPTER</p><h2>Your story.<span>A clearer path.</span></h2><p>A few thoughtful questions. One place to bring your plans together.</p></div>
-        <ol className={styles.journeySteps} aria-label="Intake steps">{sequence.map((item, index) => <li key={item} className={!completed && item === step ? styles.currentStep : completed || index < position ? styles.previousStep : undefined} aria-current={!completed && item === step ? "step" : undefined}><span className={styles.stepMarker} aria-hidden="true">{completed || index < position ? <Check size={14} /> : index + 1}</span><span>{INTAKE_STEP_LABELS[item]}</span>{!completed && item === step && <span className={styles.srOnly}>, current step</span>}</li>)}</ol>
-        <p className={styles.journeyNote}><ShieldCheck size={18} aria-hidden="true" /><span>Your answers stay in your account.<br />Save each step and return when you’re ready.</span></p>
-      </aside>
-      <div className={styles.content} id="intake-form" tabIndex={-1}><div className={styles.contentInner}>
-      <div className={styles.progressHeader}><span>{completed ? "YOUR INTAKE" : "LET’S GET TO KNOW YOU"}</span><span>{completed ? "Answers saved" : `Step ${position + 1} of ${sequence.length}`}</span></div>
-      <div className={styles.progressTrack} role="progressbar" aria-label="Intake progress" aria-valuemin={0} aria-valuemax={sequence.length} aria-valuenow={completed ? sequence.length : position + 1} aria-valuetext={completed ? "Intake complete" : `Step ${position + 1} of ${sequence.length}: ${INTAKE_STEP_LABELS[step]}`}><span style={{ width: `${completed ? 100 : ((position + 1) / sequence.length) * 100}%` }} /></div>
+      <section className={styles.content}>
+      <header className={styles.header}>
+        <a className={styles.brand} href="/workspace?view=overview" onClick={leaveIntake} aria-disabled={saving} aria-label="Harness Law overview"><BrandLogo /></a>
+        <a className={styles.headerBack} href="/workspace?view=overview" onClick={leaveIntake} aria-disabled={saving}><ArrowLeft size={16} aria-hidden="true" /><span>{editMode ? "Back to overview" : "Overview"}</span></a>
+      </header>
+      <div className={styles.contentInner} id="intake-form" tabIndex={-1}>
+      <div className={styles.progressHeader}><span>{completed || editMode ? "YOUR INTAKE" : "A LITTLE ABOUT YOU"}</span><span>{completed ? "Answers saved" : `Step ${position + 1} of ${sequence.length}`}</span></div>
+      <div className={styles.progressTrack} role="progressbar" aria-label="Intake progress" aria-valuemin={0} aria-valuemax={sequence.length} aria-valuenow={completed ? sequence.length : position + 1} aria-valuetext={completed ? "Intake complete" : `Step ${position + 1} of ${sequence.length}: ${INTAKE_STEP_LABELS[step]}`}>{sequence.map((item, index) => <span key={item} className={completed || index <= position ? styles.filledSegment : undefined} />)}</div>
 
       {loading && <section className={styles.card}><div className={styles.loading} aria-live="polite"><Loader2 className={styles.spinner} size={28} /><h1>Getting your intake ready…</h1><p>We’ll pick up from your saved answers.</p></div></section>}
       {!loading && !caseState && <section className={`${styles.card} ${styles.loadError}`}><h1>Let’s try that again.</h1><p role="alert">{error}</p>{sessionExpired ? <a className={styles.primary} href={signInPath} target="_top">Sign in to your account</a> : <button className={styles.primary} onClick={() => void loadCase()}>Retry loading your answers</button>}<a className={styles.quietLink} href="/">Back to home</a></section>}
@@ -297,17 +304,19 @@ export default function Onboarding({ initialName, initialEmail, signInPath, acco
       {!loading && caseState && !completed && <form onSubmit={event => void saveStep(event)} className={styles.card}>
         <div className={styles.cardTop}><span className={styles.sectionLabel}>{INTAKE_STEP_LABELS[step]}</span><span className={styles.savedLabel}>{!hasDraftChanges && <Check size={14} />}{saving ? "Saving…" : hasDraftChanges ? "Unsaved answers" : caseState.intake ? "Progress saved" : "Signed in"}</span></div>
         <div className={styles.stepHeading}><h1 ref={heading} tabIndex={-1}>{headings[step].title}</h1><p>{headings[step].description}</p></div>
-        <FileFormImport contextKey={`${accountId}:${caseState.id}:${step}`} fields={intakeImportFields(step)} values={{ ...answers }} disabled={blocked || sessionExpired} saveNote="Only answers on this step are filled. Review them, then Continue to save this step." onApply={values => setAnswers(current => applyIntakeImportPatch(current, step, values))} />
+        <details key={`import-${step}`} className={styles.documentImport}>
+          <summary><FileText size={17} aria-hidden="true" /><span>Fill from documents <em>Optional</em></span><ChevronDown size={16} aria-hidden="true" /></summary>
+          <div className={styles.importBody}><FileFormImport contextKey={`${accountId}:${caseState.id}:${step}`} fields={intakeImportFields(step)} values={{ ...answers }} disabled={blocked || sessionExpired} saveNote={`Only answers on this step are filled. Review them, then ${updatingCompletedIntake ? "Save changes" : "Next"} to save this step.`} onApply={values => setAnswers(current => applyIntakeImportPatch(current, step, values))} /></div>
+        </details>
         <fieldset className={styles.fields} disabled={saving}>
           <legend className={styles.srOnly}>{INTAKE_STEP_LABELS[step]}</legend>
           {step === "basics" && <>
-            <label className={styles.field}><span>Full name</span><input name="full-name" autoComplete="name" required maxLength={500} value={answers.fullName} onChange={event => patch("fullName", event.target.value)} placeholder="Applicant’s full name" /><small>Complete this intake for one applicant. You can enter an employee or family member’s name here.</small></label>
-            <label className={styles.field}><span>Account email</span><input type="email" value={initialEmail} readOnly autoComplete="email" /><small>Connected to the account you used to sign in.</small></label>
+            <label className={styles.field}><span>Full name</span><input name="full-name" autoComplete="name" required maxLength={500} value={answers.fullName} onChange={event => patch("fullName", event.target.value)} placeholder="Applicant’s full name" /><small>For you, a family member, or an employee.</small></label>
             <label className={styles.field}><span>Phone number <em>Optional</em></span><input type="tel" name="phone" autoComplete="tel" maxLength={100} value={answers.phone} onChange={event => patch("phone", event.target.value)} placeholder="Include your country code" /></label>
             <div className={styles.questionLabel}>I need immigration help for…</div>
             <div className={styles.twoOptions}>{([{ id: "myself", label: "Myself or my family" }, { id: "employees", label: "My employees" }] as const).map(option => <label key={option.id} className={`${styles.choice} ${answers.helpFor === option.id ? styles.selected : ""}`}><input type="radio" name="help-for" required checked={answers.helpFor === option.id} onChange={() => patch("helpFor", option.id)} /><span>{option.label}</span></label>)}</div>
           </>}
-          {step === "visa" && <div className={styles.visaOptions}>{VISA_OPTIONS.map(option => <label key={option.id} className={`${styles.choice} ${styles.visaChoice} ${answers.visaType === option.id ? styles.selected : ""}`}><input type="radio" name="visa-type" required checked={answers.visaType === option.id} onChange={() => chooseVisa(option.id)} /><span><strong>{option.label}</strong><small>{option.description}</small></span></label>)}</div>}
+          {step === "visa" && <><Picker key="visa-picker" label="Visa interest" placeholder="Select a visa or choose Not sure yet" options={VISA_OPTIONS.map(option => ({ value: option.id, label: option.label, description: option.description }))} selected={answers.visaType ? [answers.visaType] : []} disabled={saving} onChoose={value => { const option = VISA_OPTIONS.find(item => item.id === value); if (option) chooseVisa(option.id); }} />{answers.visaType && <p className={styles.helpText}>{VISA_OPTIONS.find(option => option.id === answers.visaType)?.description}</p>}</>}
           {step === "birth" && <>
             <Picker key="birth-picker" label="Country of birth" placeholder="Select your country of birth" options={BIRTH_COUNTRIES.map(country => ({ value: country.code, label: country.name }))} selected={answers.birthCountry ? [answers.birthCountry] : []} disabled={saving} onChoose={value => { patch("birthCountry", value); if (value !== "OTHER") patch("birthCountryOther", ""); }} />
             {answers.birthCountry === "OTHER" && <label className={styles.field}><span>Country or territory as recorded at birth</span><input required maxLength={200} value={answers.birthCountryOther} onChange={event => patch("birthCountryOther", event.target.value)} placeholder="Enter the country or territory" /></label>}
@@ -336,20 +345,46 @@ export default function Onboarding({ initialName, initialEmail, signInPath, acco
         </fieldset>
         {error && <div className={styles.error} role="alert"><p>{error}</p>{sessionExpired && <><a href={signInPath} target="_blank" rel="noopener noreferrer">Sign in again (new tab)</a><p>Then return here. Use the same account and sign-in method.</p><button type="button" disabled={saving} onClick={() => void recheckSession()}>Check sign-in</button></>}{conflictNeedsLoad && <button type="button" disabled={saving} onClick={() => void loadLatestForComparison()}>Load latest saved answers</button>}</div>}
         {conflict && <section className={styles.conflict} aria-label="Compare saved intake"><h2>Latest saved answers</h2><dl>{summaryRows(answersFromCase(conflict)).map(row => <div key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl><p>{!conflictCanRetry ? "The saved visa choice or intake progress changed. Continue from the saved answers to answer the questions in the updated flow. Your draft remains above for you to copy before replacing it." : step === "review" ? "Finishing uses the saved answers above and the additional context you entered. Use saved answers to review them first, or finish with those answers." : "Your draft remains above. Retry saves only this question onto the latest case. Use saved answers replaces this window’s draft with the latest saved intake."}</p><div className={styles.conflictActions}><button type="button" className={styles.secondary} disabled={saving} onClick={() => { adoptSaved(conflict); setError(""); }}>Use saved answers</button>{conflictCanRetry && <button type="button" className={styles.primary} disabled={saving} onClick={() => void saveStep(undefined, conflict)}>{step === "review" ? "Finish with saved answers" : "Keep this answer and retry"}</button>}</div></section>}
-        <div className={styles.actions}><button type="button" className={styles.back} disabled={blocked || position === 0} onClick={() => editStep(sequence[position - 1])}>Back</button><button type="submit" className={styles.primary} disabled={blocked}>{saving ? <><Loader2 className={styles.spinner} size={17} />Saving…</> : step === "review" ? "Finish my intake" : "Continue"}</button></div>
-        <p className={styles.saveNote}>Your answers save when you continue.</p>
+        <div className={styles.actions}><div className={styles.actionButtons}>{position > 0 && <button type="button" className={styles.back} disabled={blocked} onClick={() => editStep(sequence[position - 1])}><ArrowLeft size={16} aria-hidden="true" />Back</button>}<button type="submit" className={styles.primary} disabled={blocked}>{saving ? <><Loader2 className={styles.spinner} size={17} />Saving…</> : <>{updatingCompletedIntake ? "Save changes" : step === "review" ? "Finish intake" : "Next"}<ArrowRight size={17} aria-hidden="true" /></>}</button></div><a className={styles.laterLink} href="/workspace?view=overview" onClick={leaveIntake} aria-disabled={saving}>{updatingCompletedIntake ? "Cancel" : "Finish later"}</a></div>
+        <p className={styles.saveNote}>{updatingCompletedIntake ? "Saved changes return you to your overview." : "Each step saves when you choose Next. You can edit your intake from Overview."}</p>
       </form>}
 
-      {!loading && caseState && completed && <section className={`${styles.card} ${styles.success}`}>
-        <div className={styles.successIcon}><CheckCircle2 size={32} /></div><span className={styles.sectionLabel}>A CLEARER STARTING POINT</span><h1 ref={heading} tabIndex={-1}>Your answers are saved.</h1><p>{isEB1A ? "Your EB-1A preparation can start with the experience you’ve shared." : `Your ${visaLabel(answers.visaType)} interest is saved here. The preparation workspace currently supports EB-1A.`}</p>
+      {!loading && caseState && completed && <section className={styles.card}>
+        <div className={styles.stepHeading}><h1 ref={heading} tabIndex={-1}>Your intake, at a glance.</h1><p>Your starting point, kept in one place. Edit any answer as your plans evolve.</p></div>
         <dl className={styles.summary}>{summaryRows(answers).map(row => <div key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd><button type="button" onClick={() => editStep(row.step)} aria-label={`Edit ${row.label.toLowerCase()}`}>Edit</button></div>)}</dl>
-        {isEB1A && selectedCriteria.length > 0 && <section className={styles.evidenceNext}><h2>Useful evidence to gather</h2><p>A starting checklist for the criteria you chose.</p><ul>{selectedCriteria.map(criterion => <li key={criterion.id}><Check size={16} /><div><strong>{criterion.title}</strong><span>{criterion.examples.join(" · ")}</span></div></li>)}</ul></section>}
-        {isEB1A && answers.majorAward === "yes" && <aside className={styles.guidance}><strong>Your major award</strong><p>Gather the award record and information about its international recognition. This evidence route needs its own review.</p></aside>}
-        <div className={styles.completionActions}>{isEB1A ? <a className={styles.primary} href="/workspace">Open my EB-1A workspace</a> : <a className={styles.primary} href="/">Back to Harness Law</a>}<button className={styles.secondary} type="button" onClick={() => editStep("basics")}>Update my answers</button></div>
-        {!isEB1A && <a className={styles.quietLink} href="/workspace?sample=1">Explore the fictional EB-1A sample</a>}
+        {!isEB1A && <p className={styles.helpText}>Your {visaLabel(answers.visaType)} interest is saved. The preparation tools currently focus on EB-1A.</p>}
+        <div className={styles.completionActions}><a className={styles.primary} href="/workspace?view=overview" onClick={leaveIntake}>Back to overview<ArrowRight size={17} aria-hidden="true" /></a><button className={styles.back} type="button" onClick={() => editStep("review")}>Edit additional details</button></div>
       </section>}
-      </div></div>
+      </div>
+      <footer className={styles.footer}><ShieldCheck size={15} aria-hidden="true" /><span>Private to your account{initialEmail && <span className={styles.accountEmail}> · {initialEmail}</span>}</span></footer>
+      </section>
+      <aside className={styles.journey} aria-label="Build with confidence">
+        <div className={styles.journeyInner}>
+          <div className={styles.journeyIntro}>
+            <p className={styles.journeyEyebrow}>BUILD WITH CONFIDENCE</p>
+            <h2>{completed || step === "review" ? <>Ready for your<span>next step.</span></> : step === "background" || step === "criteria" ? <>Your experience.<span>A clearer story.</span></> : step === "visa" ? <>Your ambitions.<span>A direction.</span></> : <>Every detail.<span>Part of your story.</span></>}</h2>
+            <p>A little context now. A more focused place to build, evaluate, and prepare your case.</p>
+          </div>
+          <div className={styles.illustration} aria-hidden="true">
+            <div className={styles.orbit} /><div className={styles.dotField} />
+            <div className={styles.paperBack} />
+            <div className={styles.puzzleFloat}><BrandMark /></div>
+            <div className={styles.caseCard}>
+              <div className={styles.caseCardHeader}><span className={styles.folderIcon}><FolderOpen size={22} /></span><span><small>YOUR PREPARATION</small><strong>A place for the full picture.</strong></span><span className={styles.cardDots}>···</span></div>
+              <div className={styles.storyLine} /><div className={styles.storyLineShort} />
+              <div className={styles.milestones}>
+                <div><span className={styles.milestoneIcon}><UserRound size={19} /></span><span><strong>Your background</strong><small>Start with what makes you, you.</small></span><span className={styles.milestoneCheck}><Check size={14} /></span></div>
+                <div><span className={styles.milestoneIcon}><FolderOpen size={19} /></span><span><strong>Your evidence</strong><small>Bring the important pieces together.</small></span><span className={styles.emptyCheck} /></div>
+                <div><span className={styles.milestoneIcon}><FileCheck2 size={19} /></span><span><strong>Your case</strong><small>Build, refine, and make it your own.</small></span><span className={styles.emptyCheck} /></div>
+              </div>
+              <div className={styles.caseCardFoot}><span /><span /><span /></div>
+            </div>
+            <div className={styles.floatingNote}><span><Check size={17} /></span>Your story. In your hands.</div>
+            <svg className={styles.thread} viewBox="0 0 210 95" fill="none"><path d="M2 40C40 83 88 68 79 28C69-17 40 7 68 49C99 94 157 96 154 57C152 26 127 36 140 65C151 88 180 93 208 67" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
+          </div>
+          <p className={styles.journeyNote}>One introduction. Always yours to update.</p>
+        </div>
+      </aside>
     </main>
-    <footer className={styles.footer}><BrandLogo inverse className={styles.footerBrand} /><span>A thoughtful first step toward your next chapter.</span></footer>
   </div></EvidenceLibraryProvider>;
 }

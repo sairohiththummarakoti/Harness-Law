@@ -36,6 +36,10 @@ const steps = [
 
 const questions = [
   {
+    question: "When will I see intake, and can I change it later?",
+    answer: "Intake opens automatically only on your first sign-in. You can finish it then or choose Finish later; future sign-ins take you to your workspace. On Overview, choose Start intake, Continue intake, or Edit intake to return to your saved answers. A valid change can be saved without repeating the other questions.",
+  },
+  {
     question: "Can I use the same file to fill different forms?",
     answer: "Yes. Upload file saves your document privately to Evidence before reading it in your browser. Browse Evidence lets you select up to 20 saved files using checkboxes, even across folders. Use the selection count, Select all files here, or Clear selection to check your choices. Review the proposed answers before applying them; conflicting answers require your choice. Local form reading does not mark a source as scanned or verified.",
   },
