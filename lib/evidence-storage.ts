@@ -6,7 +6,7 @@ import { evidenceDeletionSelection, type EvidenceDeleteTarget } from './evidence
 export interface EvidenceObjectRow {
   id: string; ownerId: string; caseId: string; objectKey: string; createdAt: string;
   deletedAt?: string | null;
-  metadata: Evidence & { contentHash: string; uploadReplacementSourceId: string | null };
+  metadata: Evidence & { contentHash: string; uploadReplacementSourceId: string | null; uploadOriginalName?: string; storageBackend?: 's3' | 'r2'; storageVersion?: string; storageVersions?: string[]; storageDeletedVersions?: string[] };
 }
 export interface EvidenceRepository {
   readCase(ownerId: string): Promise<CaseState | null>;
@@ -14,8 +14,12 @@ export interface EvidenceRepository {
   /** Atomically reserve the ID, returning the existing row when another retry won. */
   registerObject(row: EvidenceObjectRow, expectedRevision: number): Promise<EvidenceObjectRow | null>;
   saveCase(ownerId: string, caseId: string, expectedRevision: number, state: CaseState): Promise<boolean>;
+  /** One transaction: rename the current original's metadata and compare-and-swap its case. */
+  renameObject?(ownerId: string, caseId: string, objectId: string, expectedRevision: number, name: string, state: CaseState): Promise<boolean>;
 }
 export interface EvidenceBlobStore {
+  /** Backend for new reservations. Existing reservations always retain their stored locator. */
+  uploadBackend?: 's3' | 'r2';
   /** Never overwrite an existing key; verify its size and contentHash on a retry. */
   putIfAbsent(key: string, bytes: ArrayBuffer, metadata: { owner: string; caseId: string; contentHash: string }): Promise<void>;
   get(key: string): Promise<{ body: ReadableStream<Uint8Array> | ArrayBuffer; size: number } | null>;
@@ -31,7 +35,7 @@ export interface EvidenceDeletionRepository {
   sourceObjects(ownerId: string, caseId: string, sourceIds: string[], objectIds: string[]): Promise<EvidenceObjectRow[]>;
   /** One transaction: reserve job, compare-and-swap the case, and tombstone its objects. */
   commit(job: EvidenceDeletionJob, sourceIds: string[], objectIds: string[], state: CaseState): Promise<boolean>;
-  complete(job: EvidenceDeletionJob): Promise<void>;
+  complete(job: EvidenceDeletionJob): Promise<boolean | void>;
   requeueObject(ownerId: string, caseId: string, objectKey: string): Promise<void>;
 }
 export interface EvidenceStorageDependencies {
@@ -52,14 +56,25 @@ async function sha256(bytes: ArrayBuffer): Promise<string> {
 async function uploadIdentity(ownerId: string, caseId: string, uploadId: string) {
   const owner = await sha256(new TextEncoder().encode(ownerId).buffer as ArrayBuffer);
   const identity = await sha256(new TextEncoder().encode(JSON.stringify([ownerId, caseId, uploadId.toLowerCase()])).buffer as ArrayBuffer);
-  return { owner, id: `upload-${identity}`, key: `quarantine/${owner}/upload-${identity}` };
+  return { owner, id: `upload-${identity}` };
+}
+function storageSlug(value: string, fallback: string): string {
+  return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[._-]+|[._-]+$/g, '').slice(0, 80) || fallback;
+}
+/** Folder names help operators; hashed owner/folder/upload identities prevent collisions. */
+export async function evidenceObjectLocation(state: CaseState, owner: string, uploadId: string, folderId: string | null, name: string, backend: 's3' | 'r2'): Promise<string> {
+  if (backend === 'r2') return `quarantine/${owner}/${uploadId}`;
+  const folder = folderId ? state.folders?.find(item => item.id === folderId) : undefined;
+  if (folderId && !folder) throw new Error('The evidence folder is unavailable.');
+  const folderIdentity = await sha256(new TextEncoder().encode(JSON.stringify([state.id, folderId])).buffer as ArrayBuffer);
+  return `s3:users/${owner}/${storageSlug(folder?.name || 'Evidence', 'folder')}/files/${folderIdentity}/${uploadId}-${storageSlug(name, 'document')}`;
 }
 function publicDocument(row: EvidenceObjectRow): Evidence {
-  const { contentHash: _contentHash, uploadReplacementSourceId: _replacement, ...document } = row.metadata;
+  const { contentHash: _contentHash, uploadReplacementSourceId: _replacement, uploadOriginalName: _originalName, storageBackend: _backend, storageVersion: _version, storageVersions: _versions, storageDeletedVersions: _deletedVersions, ...document } = row.metadata;
   return evidenceSchema.parse(document) as Evidence;
 }
 function matchesUpload(row: EvidenceObjectRow, name: string, bytes: number, contentHash: string, replacementSourceId: string | null) {
-  return row.metadata.name === name && row.metadata.bytes === bytes && row.metadata.contentHash === contentHash && row.metadata.uploadReplacementSourceId === replacementSourceId;
+  return (row.metadata.uploadOriginalName ?? row.metadata.name) === name && row.metadata.bytes === bytes && row.metadata.contentHash === contentHash && row.metadata.uploadReplacementSourceId === replacementSourceId;
 }
 function destination(state: CaseState, folderProvided: boolean, folderId: string | null, replacementSourceId: string | null): { folderId: string | null; error?: Response } {
   const source = replacementSourceId ? state.documents.find(document => document.id === replacementSourceId && !document.sample) : undefined;
@@ -90,7 +105,7 @@ function stringField(form: FormData, key: string, required = false): string | nu
 
 async function cleanDeletedUpload(row: EvidenceObjectRow, deps: EvidenceStorageDependencies) {
   // A writer can have passed its preflight before deletion committed. Reopen
-  // cleanup *after* that late write, so even a failed R2 delete stays retryable.
+  // cleanup *after* that late write, so even a failed object delete stays retryable.
   await deps.deletions?.requeueObject(row.ownerId, row.caseId, row.objectKey);
   await deps.store?.delete?.([row.objectKey]);
 }
@@ -146,7 +161,9 @@ export async function handleEvidenceUpload(request: Request, deps: EvidenceStora
     if (prepared.error) return prepared.error;
     // Reserving metadata before the deterministic key prevents concurrent retries
     // from overwriting bytes. Interrupted reservations remain safely retryable.
-    row = await deps.repository.registerObject({ id: identity.id, ownerId: user.userId, caseId, objectKey: identity.key, metadata: { ...document, contentHash, uploadReplacementSourceId: replacementSourceId }, createdAt: uploadedAt }, expectedRevision);
+    const storageBackend = row?.metadata.storageBackend ?? deps.store.uploadBackend ?? 'r2';
+    const objectKey = row?.objectKey ?? await evidenceObjectLocation(state, identity.owner, identity.id, target.folderId, name, storageBackend);
+    row = await deps.repository.registerObject({ id: identity.id, ownerId: user.userId, caseId, objectKey, metadata: { ...document, contentHash, uploadReplacementSourceId: replacementSourceId, uploadOriginalName: name, storageBackend }, createdAt: uploadedAt }, expectedRevision);
     if (!row) return conflict('This case changed before the upload. Review the latest case and retry.', await deps.repository.readCase(user.userId));
     if (row.deletedAt) { await cleanDeletedUpload(row, deps); return error('This upload was deleted. Select the file again to create a new upload.', 410, 'file_deleted'); }
     if (!matchesUpload(row, name, file.size, contentHash, replacementSourceId)) return conflict('This upload attempt belongs to a different file. Choose the file again.', await deps.repository.readCase(user.userId), 'upload_id_conflict');
@@ -157,8 +174,15 @@ export async function handleEvidenceUpload(request: Request, deps: EvidenceStora
     if (completedRetry) return json({ document: { ...publicDocument(row), folderId: completedRetry.folderId ?? null }, state, revision: state.revision });
     if (state.revision !== expectedRevision) return conflict('This case changed before the upload. Review the latest case and retry.', state);
     if (!state.consent) return error('Save your processing consent before uploading documents.', 403, 'consent_required');
-    await deps.store.putIfAbsent(row.objectKey, bytes, { owner: identity.owner, caseId, contentHash });
-    // A deletion can win while R2 is writing. Never leave bytes recreated by that late write.
+    try { await deps.store.putIfAbsent(row.objectKey, bytes, { owner: identity.owner, caseId, contentHash }); }
+    catch (writeError) {
+      if ((await deps.repository.readObject(user.userId, caseId, row.id))?.deletedAt) {
+        await cleanDeletedUpload(row, deps);
+        return error('This upload was deleted.', 410, 'file_deleted');
+      }
+      throw writeError;
+    }
+    // A deletion can win while the object is writing. Never leave bytes recreated by that late write.
     if ((await deps.repository.readObject(user.userId, caseId, row.id))?.deletedAt) {
       await cleanDeletedUpload(row, deps);
       return error('This upload was deleted.', 410, 'file_deleted');
@@ -195,6 +219,36 @@ export function attachmentDisposition(name: string): string {
   const encoded = encodeURIComponent(filename).replace(/['()*]/g, value => `%${value.charCodeAt(0).toString(16).toUpperCase()}`);
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
+export async function handleEvidenceRename(request: Request, deps: EvidenceStorageDependencies): Promise<Response> {
+  try {
+    const user = await deps.getUser();
+    if (!user) return error('Sign in to rename evidence.', 401, 'session_expired');
+    if (!matchesExpectedAccount(request, user.userId)) return error('Your session changed. Sign in to the account used in this tab before continuing.', 401, 'session_changed');
+    if (request.headers.get('origin') !== new URL(request.url).origin) return error('This request did not originate from this app.', 403, 'invalid_origin');
+    if (request.headers.get('content-type')?.split(';', 1)[0].trim() !== 'application/json') return error('Send the rename request as JSON.', 415, 'invalid_content_type');
+    const bytes = await readLimitedBody(request, 4096);
+    if (!bytes) return error('The rename request is too large.', 413, 'invalid_rename');
+    let body: { caseId?: unknown; expectedRevision?: unknown; objectId?: unknown; name?: unknown };
+    try { body = JSON.parse(new TextDecoder().decode(bytes)); } catch { return error('The rename request is invalid.', 400, 'invalid_rename'); }
+    if (!body || typeof body !== 'object' || typeof body.caseId !== 'string' || !body.caseId || body.caseId.length > 150 || typeof body.objectId !== 'string' || !body.objectId || body.objectId.length > 150 || !Number.isSafeInteger(body.expectedRevision) || Number(body.expectedRevision) < 0 || Number(body.expectedRevision) > 2147483646 || typeof body.name !== 'string') return error('Reload your case and select the file again.', 400, 'invalid_rename');
+    const name = body.name.trim(), expectedRevision = Number(body.expectedRevision);
+    if (!validUploadName(name) || safeFilename(name) !== name || /[\x7f]/.test(name)) return error('Use a valid filename without folders or control characters.', 422, 'invalid_filename');
+    const state = await deps.repository.readCase(user.userId);
+    const guard = caseGuard(state, body.caseId); if (guard || !state) return guard!;
+    const document = state.documents.find(item => !item.sample && item.objectId === body.objectId);
+    const row = await deps.repository.readObject(user.userId, body.caseId, body.objectId);
+    if (!document || !row || row.deletedAt) return error('This file is not available in the current case.', 404, 'file_not_found');
+    if (name.split('.').pop()!.toLowerCase() !== document.name.split('.').pop()!.toLowerCase()) return error('Keep the existing file extension when renaming.', 422, 'extension_changed');
+    if (document.name === name && row.metadata.name === name) return json({ document, state, revision: state.revision });
+    if (state.revision !== expectedRevision) return conflict('This case changed before the rename. Review the latest case and retry.', state);
+    if (!deps.repository.renameObject) return error('Evidence rename is temporarily unavailable.', 503, 'rename_unavailable');
+    const next = structuredClone(state); next.revision++; next.updatedAt = new Date().toISOString();
+    const renamed = next.documents.find(item => item.objectId === body.objectId)!; renamed.name = name;
+    if (!caseSchema.safeParse(next).success || new TextEncoder().encode(JSON.stringify({ state: next, expectedRevision })).byteLength > MAX_CASE_BODY) return error('The renamed case cannot be saved safely.', 422, 'invalid_state');
+    if (!await deps.repository.renameObject(user.userId, body.caseId, body.objectId, expectedRevision, name, next)) return conflict('This case changed before the rename. Review the latest case and retry.', await deps.repository.readCase(user.userId));
+    return json({ document: renamed, state: next, revision: next.revision });
+  } catch { return error('The file could not be renamed. Please retry.', 503, 'rename_failed'); }
+}
 export async function handleEvidenceRead(request: Request, deps: EvidenceStorageDependencies): Promise<Response> {
   try {
     const user = await deps.getUser();
@@ -228,10 +282,9 @@ async function cleanDeletion(job: EvidenceDeletionJob, deps: EvidenceStorageDepe
   if (job.completedAt) return true;
   if (!deps.deletions || !deps.store?.delete) return false;
   try {
-    // R2 deletion is idempotent, including a retry after a response or DB write was lost.
+    // Routed object deletion is idempotent, including a lost response or DB write.
     for (let offset = 0; offset < job.objectKeys.length; offset += 500) await deps.store.delete(job.objectKeys.slice(offset, offset + 500));
-    await deps.deletions.complete(job);
-    return true;
+    return await deps.deletions.complete(job) !== false;
   } catch { return false; }
 }
 

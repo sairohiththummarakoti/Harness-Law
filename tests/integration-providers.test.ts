@@ -77,6 +77,18 @@ test('S3 refuses unversioned buckets and altered bytes without exposing upstream
   await assert.rejects(wrongAcknowledgement.put('quarantine/id', pdf, 'application/pdf'), errorCode('storage_integrity_failure'));
 });
 
+test('S3 evidence read limit bounds streaming response bodies before allocation', async () => {
+  const config = { bucket: 'private-fixtures', region: 'us-east-1', accessKeyId: 'TEST', secretAccessKey: 'synthetic-secret' };
+  let canceled = false;
+  const store = createS3Store(config, { maxObjectBytes: 3, fetch: asFetch(async () => new Response(new ReadableStream({
+    start(controller) { controller.enqueue(new Uint8Array(4)); },
+    cancel() { canceled = true; },
+  }), { headers: { 'x-amz-version-id': 'v1', 'x-amz-meta-sha256': 'a'.repeat(64) } })) });
+  await assert.rejects(store.get('users/test/file'), errorCode('provider_response_too_large'));
+  assert.equal(canceled, true);
+  await assert.rejects(store.put('users/test/file', new Uint8Array(4), 'application/octet-stream'), errorCode('invalid_size'));
+});
+
 test('R2 keys are immutable and retrieval checks the stored digest and version', async () => {
   const data = new Map<string, { bytes: Uint8Array; metadata: Record<string, string>; contentType: string; version: string }>();
   const bucket = {

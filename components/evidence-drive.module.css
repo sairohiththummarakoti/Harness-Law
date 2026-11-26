@@ -84,3 +84,8 @@
 @media (max-width: 1280px) { .folderGrid, .grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .listHeading, .list .file { grid-template-columns: minmax(0,1fr) 116px 85px 34px; gap: 10px; } .list .size, .listHeading > span:nth-child(4) { display: none; } }
 @media (max-width: 700px) { .toolbar { flex-wrap: wrap; padding: 12px 15px; gap: 10px; } .search { flex-basis: 100%; } .search input { font-size: 16px; } .filter { flex: 1; max-width: none; } .locationRow { padding: 16px; } .folderSection { padding: 0 15px 18px; } .folderGrid { grid-template-columns: 1fr; gap: 9px; } .grid { grid-template-columns: 1fr; padding: 15px; } .listHeading { display: none; } .list .file { grid-template-columns: minmax(0,1fr) 34px; gap: 6px 10px; padding: 15px; } .list .fileOpen { grid-column: 1; } .list .menu { grid-column: 2; grid-row: 1 / 3; } .list .status { grid-column: 1; padding-left: 49px; } .list .date { display: none; } .bottomNote { padding: 14px 15px; } .headerActions { width: 100%; } .empty { padding: 36px 20px; } .folderOpen strong, .fileName strong { font-size: 14px; } .menuTrigger { width: 34px; min-height: 44px; } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+.externalFolder { background: #edf5ff; border-color: #c7dcf4; }
+.externalFolder .folderOpen > svg { color: #2875c4; fill: #d7e9ff; }
+.cloudLocation { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin:0 20px 20px; padding:15px; border-radius:8px; background:#edf5ff; color:#285b8a; font-size:13px; }
+.cloudLocation > span { flex:1; min-width:180px; }

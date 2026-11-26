@@ -211,3 +211,4 @@
   .footer { font-size: 10px; }
 }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } .choice { transition: none; } }
+.stepRequirement { display: inline-block; margin-left: 8px; padding: 3px 7px; border: 1px solid #d3dfca; border-radius: 6px; background: #f2f7e8; color: #496244; font-size: 11px; letter-spacing: 0; text-transform: none; }

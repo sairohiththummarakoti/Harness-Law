@@ -1,4 +1,4 @@
-export interface EvidenceFolder { id: string; name: string; parentId: string | null }
+export interface EvidenceFolder { id: string; name: string; parentId: string | null; origin?: 'upload' | 'external'; connectionId?: string }
 
 export const MAX_EVIDENCE_FOLDERS = 200;
 export const MAX_FOLDER_NAME = 80;

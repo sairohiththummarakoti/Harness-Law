@@ -53,7 +53,7 @@ export const caseSchema=z.object({
   id,name:short,mode:z.enum(['sample','personal']),revision,
   profile:z.object({fullName:short,preferredName:short,email:short,phone:short,country:short,address:text,priorNames:text,confirmed:z.boolean()}).strict(),
   professional:z.object({field:short,role:short,organization:short,timeline:text,achievements:text,intendedWork:text}).strict(),
-  criteria:z.array(criterion).max(10),documents:z.array(evidenceSchema).max(200),folders:z.array(z.object({id,name:z.string().min(1).max(MAX_FOLDER_NAME),parentId:id.nullable()}).strict()).max(MAX_EVIDENCE_FOLDERS).optional(),
+  criteria:z.array(criterion).max(10),documents:z.array(evidenceSchema).max(200),folders:z.array(z.object({id,name:z.string().min(1).max(MAX_FOLDER_NAME),parentId:id.nullable(),origin:z.enum(['upload','external']).optional(),connectionId:id.optional()}).strict()).max(MAX_EVIDENCE_FOLDERS).optional(),
   facts:z.array(z.object({id,label:short,value:text,originalValue:text,sourceId:id,page:z.number().int().min(1).max(10000),status:z.enum(['unresolved','confirmed','corrected','issue']),reason:text}).strict()).max(1000),
   runs:z.record(criterion,z.object({criterion,generation:revision,status:z.enum(['idle','queued','running','succeeded','failed','canceled']),stage:short,error:text.optional(),questions:z.array(text).max(100),result:result.nullable(),history:z.array(result).max(100)}).strict()),
   composition:composition.nullable(),compositionHistory:z.array(composition).max(500).optional(),

@@ -270,3 +270,39 @@ test('direct edits cannot bypass first-intake progression or active-question val
   assert.throws(() => applyIntakeEdit(changed, 'review', answers()), /earlier/);
   assert.equal(caseSchema.safeParse({ ...complete, intake: { ...complete.intake, firstCompletedAt: 'invalid-date' } }).success, false);
 });
+
+test('the first four questions can be saved without optional details and sync only the required profile fields', () => {
+  const input = { ...answers(), field: '', role: '', criteria: [], criteriaUnsure: false, majorAward: '' as const };
+  let state = createEmptyCase();
+  state.professional = { ...state.professional, field: 'Existing field', role: 'Existing role' };
+  for (const step of ['basics','visa','birth','citizenships'] as const) state = applyIntakeStep(state, step, input);
+  assert.equal(state.intake!.step, 'background');
+  assert.equal(state.intake!.completedAt, undefined);
+  assert.equal(state.intake!.firstCompletedAt, undefined);
+  assert.equal(state.profile.fullName, input.fullName);
+  assert.equal(state.profile.phone, input.phone);
+  assert.equal(state.professional.field, 'Existing field');
+  assert.equal(state.professional.role, 'Existing role');
+  assert.deepEqual(state.criteria, []);
+  assert.ok(caseSchema.safeParse(state).success);
+});
+
+test('editing a deferred intake preserves newer profile fields and still allows optional details later', () => {
+  const input = { ...answers(), field: '', role: '', criteria: [], criteriaUnsure: false, majorAward: '' as const };
+  let state = createEmptyCase();
+  for (const step of ['basics','visa','birth','citizenships'] as const) state = applyIntakeStep(state, step, input);
+  state = applyAction(state, {type:'profile',patch:{fullName:'Newer workspace name',phone:'+1 555 999 9999'}});
+  state = applyIntakeEdit(state, 'citizenships', { ...input, citizenships:['FR'] });
+  assert.equal(state.profile.fullName,'Newer workspace name');
+  assert.equal(state.profile.phone,'+1 555 999 9999');
+  assert.equal(state.intake!.step,'background');
+  state = applyIntakeEdit(state, 'background', {...intakeAnswersFromCase(state),field:'Research',role:'Scientist'});
+  assert.equal(state.professional.field,'Research');
+  assert.equal(state.intake!.step,'criteria');
+  state = applyIntakeEdit(state,'criteria',{...intakeAnswersFromCase(state),criteria:['C04'],majorAward:'no'});
+  assert.ok(state.intake!.completedAt);
+  assert.equal(state.profile.fullName,'Newer workspace name');
+  assert.equal(state.profile.phone,'+1 555 999 9999');
+  assert.deepEqual(state.criteria,['C04']);
+  assert.ok(caseSchema.safeParse(state).success);
+});

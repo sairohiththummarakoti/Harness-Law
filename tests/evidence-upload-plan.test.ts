@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { planEvidenceUpload } from '../lib/evidence-upload-plan.ts';
+import { planEvidenceUpload, planNamedEvidenceUpload, sameUploadSelection } from '../lib/evidence-upload-plan.ts';
 
 const file = (name: string, path = '', size = 100) => ({ name, size, webkitRelativePath: path });
 test('directory uploads preserve nested paths and reuse folders without changing existing records', () => {
@@ -27,4 +27,52 @@ test('invalid paths, missing destinations and library limits fail before mutatio
 test('plain file selection uses the chosen destination and never recreates relative folders', () => {
   const plan = planEvidenceUpload([file('a.pdf', 'Ignored/a.pdf')], [{ id: 'target', name: 'Target', parentId: null }], 'target', 0, false);
   assert.equal(plan.entries[0].folderId, 'target'); assert.equal(plan.folders.length, 0);
+});
+
+test('a named device location replaces the selected root and preserves only its nested contents', () => {
+  const files = [file('one.pdf', 'Research/one.pdf'), file('two.txt', 'Research/Published/two.txt')];
+  let id = 0;
+  const plan = planNamedEvidenceUpload(files, [], 0, 'My research', true, null, () => `folder-${++id}`);
+  assert.deepEqual(plan.folders, [
+    { id: 'folder-1', name: 'My research', parentId: null, origin: 'upload' },
+    { id: 'folder-2', name: 'Published', parentId: 'folder-1' },
+  ]);
+  assert.deepEqual(plan.entries.map(entry => entry.folderId), ['folder-1', 'folder-2']);
+  assert.equal(plan.entries[0].file, files[0]);
+  const sameName = planNamedEvidenceUpload([file('one.pdf', 'Research/one.pdf')], [], 0, 'Research', true);
+  assert.equal(sameName.folders.length, 1);
+});
+
+test('named upload retries reuse the destination and existing descendants without counting confirmed files again', () => {
+  const first = file('one.pdf', 'Research/Published/one.pdf');
+  const second = file('two.pdf', 'Research/Published/two.pdf');
+  let id = 0;
+  const initial = planNamedEvidenceUpload([first, second], [], 198, 'Research', true, null, () => `folder-${++id}`);
+  const retry = planNamedEvidenceUpload([second], initial.folders, 199, 'Research', true, initial.folder.id);
+  assert.deepEqual(retry.folders, []); assert.equal(retry.entries.length, 1);
+  assert.equal(retry.entries[0].folderId, initial.entries[1].folderId);
+  assert.equal(retry.entries[0].file, second);
+  assert.equal(sameUploadSelection([first, second], [first, second]), true);
+  assert.equal(sameUploadSelection([first, { ...second }], [first, second]), false);
+  assert.equal(sameUploadSelection([second], [first, second]), false);
+});
+
+test('named uploads reject invalid selections, collisions and excess folders before any destination is created', () => {
+  const existing = [{ id: 'root', name: 'Research', parentId: null, origin: 'upload' as const }];
+  const before = structuredClone(existing);
+  assert.throws(() => planNamedEvidenceUpload([file('a.pdf')], existing, 0, 'research', false), /already exists/);
+  assert.throws(() => planNamedEvidenceUpload([file('desktop.ini')], existing, 0, 'Other', false), /supported/);
+  assert.throws(() => planNamedEvidenceUpload([], existing, 0, 'Other', false), /supported/);
+  assert.throws(() => planNamedEvidenceUpload([file('a.pdf')], existing, 0, '../Other', false), /slashes/);
+  assert.throws(() => planNamedEvidenceUpload([file('a.pdf')], existing, 0, 'Renamed', false, 'root'), /changed/);
+  const full = Array.from({ length: 200 }, (_, i) => ({ id: `full-${i}`, name: `Folder ${i}`, parentId: null }));
+  assert.throws(() => planNamedEvidenceUpload([file('a.pdf')], full, 0, 'Another', false), /200 folders/);
+  assert.deepEqual(existing, before);
+});
+
+test('stripping a directory root never accepts traversal, malformed paths, or mixed source folders', () => {
+  for (const path of ['../a.pdf', '/a.pdf', 'Docs//a.pdf', 'Docs/b.pdf', '', 'Docs\\a.pdf', './a.pdf']) {
+    assert.throws(() => planNamedEvidenceUpload([file('a.pdf', path)], [], 0, 'Safe', true));
+  }
+  assert.throws(() => planNamedEvidenceUpload([file('a.pdf', 'First/a.pdf'), file('b.pdf', 'Second/b.pdf')], [], 0, 'Safe', true), /one folder/);
 });

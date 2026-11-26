@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, Download, FileText, Folder, FolderInput, FolderPlus, Grid2X2, List, Loader2, MoreHorizontal, Pencil, Search, Trash2, Upload, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Cloud, Download, FileText, Folder, FolderInput, FolderPlus, Grid2X2, List, Loader2, MoreHorizontal, Pencil, RefreshCw, Search, Trash2, Upload, X } from "lucide-react";
 import { applyAction, CRITERIA, type Action, type CaseState, type Evidence, type EvidenceFolder } from "@/lib/model";
 import { folderPath, folderTrail, MAX_FOLDER_NAME } from "@/lib/evidence-folders";
 import styles from "./evidence-drive.module.css";
 
-type Manage = { kind: "create" } | { kind: "rename" | "move-folder" | "delete-folder" | "move-file" | "delete-file"; id: string };
+type Manage = { kind: "create" } | { kind: "rename" | "move-folder" | "delete-folder" | "move-file" | "delete-file" | "rename-file"; id: string };
 export type EvidenceDriveProps = {
   state: CaseState;
   initialFilter?: string;
@@ -19,6 +19,12 @@ export type EvidenceDriveProps = {
   onOpen: (document: Evidence) => void;
   onDownload?: (document: Evidence) => void;
   onAction: (action: Action) => void;
+  sources?: ReactNode;
+  setup?: boolean;
+  onOpenConnection?: (id: string) => void;
+  onRename?: (document: Evidence, name: string) => Promise<void>;
+  onRenameFolder?: (folderId: string, name: string) => Promise<void>;
+  onReplace?: (document: Evidence) => void;
 };
 
 function sizeLabel(bytes: number): string {
@@ -74,7 +80,7 @@ function ActionMenu({ label, open, onToggle, onClose, items, children, disabled 
   </div>;
 }
 
-export function EvidenceDrive({ state, initialFilter = "all", disabled, uploading, uploadError, onUpload, onRequestUpload, onDelete, onOpen, onDownload, onAction }: EvidenceDriveProps) {
+export function EvidenceDrive({ state, initialFilter = "all", disabled, uploading, uploadError, onUpload, onRequestUpload, onDelete, onOpen, onDownload, onAction, sources, setup = false, onOpenConnection, onRename, onRenameFolder, onReplace }: EvidenceDriveProps) {
   const folders = state.folders ?? [];
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -102,8 +108,8 @@ export function EvidenceDrive({ state, initialFilter = "all", disabled, uploadin
     (searching || filter !== "all" ? document.name.toLowerCase().includes(search) : (document.folderId ?? null) === folderId)
     && (filter === "all" || filter === "needs_attention" && document.status !== "ready" || document.associations.some(association => association.criterion === filter && association.status !== "removed"))
   ).sort((a, b) => a.name.localeCompare(b.name));
-  const selectedFolder = manage && "id" in manage && manage.kind !== "move-file" && manage.kind !== "delete-file" ? folders.find(item => item.id === manage.id) : undefined;
-  const selectedDocument = manage?.kind === "move-file" || manage?.kind === "delete-file" ? state.documents.find(item => item.id === manage.id) : undefined;
+  const selectedFolder = manage && "id" in manage && manage.kind !== "move-file" && manage.kind !== "delete-file" && manage.kind !== "rename-file" ? folders.find(item => item.id === manage.id) : undefined;
+  const selectedDocument = manage?.kind === "move-file" || manage?.kind === "delete-file" || manage?.kind === "rename-file" ? state.documents.find(item => item.id === manage.id) : undefined;
   const movableFolders = folders.filter(folder => !selectedFolder || !folderTrail(folders, folder.id).some(ancestor => ancestor.id === selectedFolder.id)).sort((a, b) => folderPath(folders, a.id).localeCompare(folderPath(folders, b.id)));
   const deletingFolderIds = new Set(selectedFolder ? folders.filter(folder => folderTrail(folders, folder.id).some(ancestor => ancestor.id === selectedFolder.id)).map(folder => folder.id) : []);
   const deletingFileCount = state.documents.filter(document => document.folderId && deletingFolderIds.has(document.folderId)).length;
@@ -134,7 +140,19 @@ export function EvidenceDrive({ state, initialFilter = "all", disabled, uploadin
       }
       return;
     }
-    const action: Action = manage.kind === "create" ? { type: "folder_create", folder: { id: `folder-${crypto.randomUUID()}`, name, parentId: folderId } }
+    if (manage.kind === "rename-file" || manage.kind === "rename" && onRenameFolder) {
+      setDeleting(true); setError("");
+      try {
+        if (manage.kind === "rename-file") {
+          if (!selectedDocument || !onRename) throw new Error("This file cannot be renamed.");
+          await onRename(selectedDocument, name.trim());
+        } else { applyAction(state, { type: "folder_rename", folderId: manage.id, name }); await onRenameFolder!(manage.id, name); }
+        setManage(null);
+      } catch (cause) { setError(cause instanceof Error ? cause.message : "The name could not be saved."); }
+      finally { setDeleting(false); }
+      return;
+    }
+    const action: Action = manage.kind === "create" ? { type: "folder_create", folder: { id: `folder-${crypto.randomUUID()}`, name, parentId: folderId, origin: "upload" } }
       : manage.kind === "rename" ? { type: "folder_rename", folderId: manage.id, name }
       : manage.kind === "move-folder" ? { type: "folder_move", folderId: manage.id, parentId: destination || null }
       : { type: "document_move", sourceId: manage.id, folderId: destination || null };
@@ -144,6 +162,7 @@ export function EvidenceDrive({ state, initialFilter = "all", disabled, uploadin
   function folderMenu(folder: EvidenceFolder) {
     const key = `folder:${folder.id}`;
     return <ActionMenu label={`Actions for folder ${folder.name}`} open={openMenu === key} onToggle={() => setOpenMenu(openMenu === key ? null : key)} onClose={() => setOpenMenu(null)} items={[
+      ...(folder.connectionId && onOpenConnection ? [{ label: "Browse cloud location", icon: <Cloud size={15} />, disabled: locked, onSelect: () => onOpenConnection(folder.connectionId!) }] : []),
       { label: "Rename", icon: <Pencil size={15} />, disabled: locked, onSelect: () => manageFolder("rename", folder) },
       { label: "Move folder", icon: <FolderInput size={15} />, disabled: locked, onSelect: () => manageFolder("move-folder", folder) },
       { label: "Delete folder", icon: <Trash2 size={15} />, disabled: locked, danger: true, onSelect: () => manageFolder("delete-folder", folder) },
@@ -152,6 +171,8 @@ export function EvidenceDrive({ state, initialFilter = "all", disabled, uploadin
   function documentMenu(document: Evidence) {
     const key = `file:${document.id}`;
     return <ActionMenu label={`Actions for file ${document.name}`} open={openMenu === key} onToggle={() => setOpenMenu(openMenu === key ? null : key)} onClose={() => setOpenMenu(null)} items={[
+      ...(onRename && !document.sample ? [{ label: "Rename file", icon: <Pencil size={15} />, disabled: locked, onSelect: () => { setName(document.name); setError(""); setManage({ kind: "rename-file", id: document.id }); } }] : []),
+      ...(onReplace && !document.sample ? [{ label: "Replace file", icon: <RefreshCw size={15} />, disabled: locked, onSelect: () => onReplace(document) }] : []),
       { label: "Move to folder", icon: <FolderInput size={15} />, disabled: locked, onSelect: () => moveDocument(document) },
       ...(onDownload && !document.sample ? [{ label: "Download original", icon: <Download size={15} />, disabled: locked, onSelect: () => onDownload(document) }] : []),
       { label: "File details", icon: <FileText size={15} />, onSelect: () => onOpen(document) },
@@ -166,13 +187,14 @@ export function EvidenceDrive({ state, initialFilter = "all", disabled, uploadin
     }
     setDropError(""); onUpload(Array.from(event.dataTransfer.files), folderId);
   }}>
-    <div className="page-heading"><div><span className="eyebrow">YOUR DOCUMENTS, TOGETHER</span><h1>Evidence library</h1><p className="title-subtitle">A place for every document. Organize once, use wherever you need it.</p></div><div className={styles.headerActions}>
+    <div className="page-heading"><div><span className="eyebrow">YOUR DOCUMENTS, TOGETHER</span>{setup ? <h2>Evidence library</h2> : <h1>Evidence library</h1>}<p className="title-subtitle">A place for every document. Organize once, use wherever you need it.</p></div><div className={styles.headerActions}>
       <button type="button" className="button secondary" disabled={locked || folders.length >= 200} onClick={() => { setOpenMenu(null); setName(""); setError(""); setManage({ kind: "create" }); }}><FolderPlus size={17} />New folder</button>
-      <ActionMenu label="Upload to Evidence" primary disabled={locked} open={openMenu === "upload"} onToggle={() => setOpenMenu(openMenu === "upload" ? null : "upload")} onClose={() => setOpenMenu(null)} items={[
+      {(!sources || folderId) && <ActionMenu label="Upload to Evidence" primary disabled={locked} open={openMenu === "upload"} onToggle={() => setOpenMenu(openMenu === "upload" ? null : "upload")} onClose={() => setOpenMenu(null)} items={[
         { label: "Upload files", icon: <FileText size={17} />, onSelect: () => { setDropError(""); onRequestUpload(folderId, "files"); } },
         { label: "Upload folder", icon: <Folder size={17} />, onSelect: () => { setDropError(""); onRequestUpload(folderId, "folder"); } },
-      ]}>{uploading ? <Loader2 size={17} className={styles.spinner} aria-hidden="true" /> : <Upload size={17} aria-hidden="true" />}{uploading ? "Uploading…" : "Upload"}<ChevronDown size={15} aria-hidden="true" /></ActionMenu>
+      ]}>{uploading ? <Loader2 size={17} className={styles.spinner} aria-hidden="true" /> : <Upload size={17} aria-hidden="true" />}{uploading ? "Uploading…" : "Upload"}<ChevronDown size={15} aria-hidden="true" /></ActionMenu>}
     </div></div>
+    {sources}
     {state.mode === "sample" && <p className={styles.sampleNotice}>Fictional sample files. Folder changes are temporary; personal uploads belong in your own workspace.</p>}
     <div className={`${styles.surface} ${dragging ? styles.dragging : ""}`}>
       <div className={styles.toolbar}>
@@ -181,9 +203,10 @@ export function EvidenceDrive({ state, initialFilter = "all", disabled, uploadin
         <div className={styles.viewToggle} role="group" aria-label="File view"><button type="button" aria-label="List view" aria-pressed={view === "list"} onClick={() => setView("list")}><List size={18} /></button><button type="button" aria-label="Grid view" aria-pressed={view === "grid"} onClick={() => setView("grid")}><Grid2X2 size={18} /></button></div>
       </div>
       <div className={styles.locationRow}><nav className={styles.breadcrumbs} aria-label="Evidence folders"><button type="button" onClick={() => openFolder(null)} aria-current={!folderId && !searching ? "location" : undefined}>All files</button>{trail.map(folder => <span key={folder.id}><ChevronRight size={14} aria-hidden="true" /><button type="button" onClick={() => openFolder(folder.id)} aria-current={folder.id === folderId && !searching ? "location" : undefined}>{folder.name}</button></span>)}</nav><span className={styles.count}>{searching || filter !== "all" ? "Results across all folders" : `${visibleFolders.length} ${visibleFolders.length === 1 ? "folder" : "folders"} · ${documents.length} ${documents.length === 1 ? "file" : "files"}`}</span></div>
+      {trail.at(-1)?.connectionId && onOpenConnection && <div className={styles.cloudLocation}><Cloud size={19} /><span>Cloud originals are read-only. Files below are your Harness Law copies.</span><button className="button secondary small" disabled={locked} onClick={() => onOpenConnection(trail.at(-1)!.connectionId!)}>Browse cloud location<ChevronRight size={15} /></button></div>}
       {dragging && <p className={styles.dropNotice}>Drop files to upload into {folderId ? trail.at(-1)?.name : "All files"}.</p>}
       {(dropError || uploadError) && <p className={styles.error} role="alert">{dropError || uploadError}</p>}
-      {!!visibleFolders.length && <section className={styles.folderSection} aria-label="Folders"><div className={styles.folderGrid}>{visibleFolders.map(folder => <div className={styles.folderTile} key={folder.id}><button className={styles.folderOpen} type="button" onClick={() => openFolder(folder.id)}><Folder size={24} aria-hidden="true" /><span><strong>{folder.name}</strong><small>{searching ? folderPath(folders, folder.parentId) : `${folders.filter(item => item.parentId === folder.id).length + state.documents.filter(document => document.folderId === folder.id).length} items`}</small></span></button>{folderMenu(folder)}</div>)}</div></section>}
+      {!!visibleFolders.length && <section className={styles.folderSection} aria-label="Folders"><div className={styles.folderGrid}>{visibleFolders.map(folder => <div className={styles.folderTile + (folder.origin === "external" ? " " + styles.externalFolder : "")} key={folder.id}><button className={styles.folderOpen} type="button" onClick={() => openFolder(folder.id)}><Folder size={24} aria-hidden="true" /><span><strong>{folder.name}</strong>{folder.origin === "external" && <small>Cloud location · saved copies</small>}<small>{searching ? folderPath(folders, folder.parentId) : `${folders.filter(item => item.parentId === folder.id).length + state.documents.filter(document => document.folderId === folder.id).length} items`}</small></span></button>{folderMenu(folder)}</div>)}</div></section>}
       {!!documents.length && <section aria-label="Files" className={`${styles.files} ${view === "grid" ? styles.grid : styles.list}`}>
         {view === "list" && <div className={styles.listHeading} aria-hidden="true"><span>Name</span><span>Status</span><span>Added</span><span>Size</span><span /></div>}
         {documents.map(document => <article className={styles.file} key={document.id}>
@@ -192,22 +215,22 @@ export function EvidenceDrive({ state, initialFilter = "all", disabled, uploadin
           <span className={styles.date}>{dateLabel(document.uploadedAt)}</span><span className={styles.size}>{sizeLabel(document.bytes)}</span>{documentMenu(document)}
         </article>)}
       </section>}
-      {!documents.length && !visibleFolders.length && <div className={styles.empty}><Folder size={36} aria-hidden="true" /><h2>{searching || filter !== "all" ? "No matching files" : folderId ? "This folder is ready for your files" : "Your documents start here"}</h2><p>{searching || filter !== "all" ? "Try another search or filter." : "Choose Upload above to add files or an entire folder, or drop files here."}</p>{(searching || filter !== "all") && <button className="button secondary small" type="button" onClick={() => { setQuery(""); setFilter("all"); }}>Clear filters</button>}</div>}
+      {!documents.length && !visibleFolders.length && <div className={styles.empty}><Folder size={36} aria-hidden="true" /><h2>{searching || filter !== "all" ? "No matching files" : folderId ? "This folder is ready for your files" : "Your documents start here"}</h2><p>{searching || filter !== "all" ? "Try another search or filter." : sources && !folderId ? "Choose a source above to create your first folder, or drop files here." : "Choose Upload above to add files or an entire folder, or drop files here."}</p>{(searching || filter !== "all") && <button className="button secondary small" type="button" onClick={() => { setQuery(""); setFilter("all"); }}>Clear filters</button>}</div>}
       <div className={styles.bottomNote}><span>Drop files here · Upload a folder to keep its structure · Up to 20 MB per file</span><span>Moving a file keeps its source links.</span></div>
     </div>
     <p className={styles.help}>PDF, DOCX, TXT, Markdown, CSV, JSON, JPG and PNG. Folder uploads keep subfolders containing supported files; browsers do not include empty folders. Stored documents still need review; organizing a file does not verify its contents.</p>
     {manage && <dialog ref={dialog} className={styles.dialog} onCancel={event => { if (deleting) event.preventDefault(); else setManage(null); }} aria-labelledby={titleId}><form onSubmit={event => void submit(event)}>
-      <div className={styles.dialogHeader}><h2 id={titleId}>{manage.kind === "create" ? "New folder" : manage.kind === "rename" ? "Rename folder" : manage.kind === "delete-folder" ? "Delete folder?" : manage.kind === "delete-file" ? "Delete file?" : "Move to folder"}</h2><button className={styles.close} type="button" aria-label="Close library dialog" disabled={deleting} onClick={() => setManage(null)}><X size={20} /></button></div>
-      {manage.kind === "create" || manage.kind === "rename" ? <label className={styles.field}>Folder name<input autoFocus value={name} maxLength={MAX_FOLDER_NAME} onChange={event => { setName(event.target.value); setError(""); }} required disabled={locked} /><small>{manage.kind === "create" ? `Create in ${folderPath(folders, folderId)}` : "File names and source links stay the same."}</small></label>
+      <div className={styles.dialogHeader}><h2 id={titleId}>{manage.kind === "create" ? "New folder" : manage.kind === "rename-file" ? "Rename file" : manage.kind === "rename" ? "Rename folder" : manage.kind === "delete-folder" ? "Delete folder?" : manage.kind === "delete-file" ? "Delete file?" : "Move to folder"}</h2><button className={styles.close} type="button" aria-label="Close library dialog" disabled={deleting} onClick={() => setManage(null)}><X size={20} /></button></div>
+      {manage.kind === "create" || manage.kind === "rename" || manage.kind === "rename-file" ? <label className={styles.field}>{manage.kind === "rename-file" ? "File name" : "Folder name"}<input autoFocus value={name} maxLength={manage.kind === "rename-file" ? 180 : MAX_FOLDER_NAME} onChange={event => { setName(event.target.value); setError(""); }} required disabled={locked} /><small>{manage.kind === "create" ? `Create in ${folderPath(folders, folderId)}` : manage.kind === "rename-file" ? "Keep the same file extension. Source links stay connected." : "File names and source links stay the same."}</small></label>
         : isDelete ? <div className={styles.deleteSummary}>
           <span className={styles.deleteIcon}><Trash2 size={23} aria-hidden="true" /></span>
           <p className={styles.dialogText}><strong>{selectedDocument?.name ?? selectedFolder?.name ?? "This item"}</strong>{manage.kind === "delete-folder" ? <> and everything inside will be deleted: <strong>{deletingFileCount} {deletingFileCount === 1 ? "file" : "files"}</strong> and <strong>{Math.max(0, deletingFolderIds.size - 1)} {deletingFolderIds.size === 2 ? "subfolder" : "subfolders"}</strong>.</> : " will be deleted from your Evidence library."}</p>
-          <p className={styles.dialogText}>{state.mode === "sample" ? "This affects the fictional sample only. Personal files are unchanged." : "This also deletes the stored original files and cannot be undone."} Any sections that rely on these files will need review.</p>
+          <p className={styles.dialogText}>{state.mode === "sample" ? "This affects the fictional sample only. Personal files are unchanged." : "This deletes the Harness Law copies and cannot be undone. Originals in connected cloud drives are unchanged."} Any sections that rely on these files will need review.</p>
         </div>
         : <label className={styles.field}>Destination for {selectedDocument?.name ?? selectedFolder?.name ?? "this item"}<select autoFocus value={destination} onChange={event => { setDestination(event.target.value); setError(""); }} disabled={locked}><option value="">All files</option>{movableFolders.map(folder => <option key={folder.id} value={folder.id}>{folderPath(folders, folder.id)}</option>)}</select><small>Moving changes its location, not its evidence associations.</small></label>}
       {error && <p className={styles.error} role="alert">{error}</p>}
-      <div className={styles.dialogActions}><button type="button" className="button secondary" autoFocus={isDelete} disabled={deleting} onClick={() => setManage(null)}>Cancel</button><button type="submit" className={`button ${isDelete ? "danger" : "primary"}`} disabled={locked}>{deleting ? <><Loader2 size={16} className={styles.spinner} aria-hidden="true" />Deleting…</> : manage.kind === "create" ? "Create folder" : manage.kind === "rename" ? "Save name" : manage.kind === "delete-folder" ? "Delete folder" : manage.kind === "delete-file" ? "Delete file" : "Move here"}</button></div>
-      {deleting && <p className={styles.pending} role="status">Deleting from your library and private storage…</p>}
+      <div className={styles.dialogActions}><button type="button" className="button secondary" autoFocus={isDelete} disabled={deleting} onClick={() => setManage(null)}>Cancel</button><button type="submit" className={`button ${isDelete ? "danger" : "primary"}`} disabled={locked}>{deleting ? <><Loader2 size={16} className={styles.spinner} aria-hidden="true" />{isDelete ? "Deleting…" : "Saving…"}</> : manage.kind === "create" ? "Create folder" : manage.kind === "rename" || manage.kind === "rename-file" ? "Save name" : manage.kind === "delete-folder" ? "Delete folder" : manage.kind === "delete-file" ? "Delete file" : "Move here"}</button></div>
+      {deleting && <p className={styles.pending} role="status">{isDelete ? "Deleting from your library and private storage…" : "Saving your change…"}</p>}
     </form></dialog>}
   </div>;
 }

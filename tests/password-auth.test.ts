@@ -15,6 +15,7 @@ function fixture(){
   sqlite.exec(readFileSync(new URL('../drizzle/0000_same_leopardon.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../drizzle/0001_integration_cases.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../drizzle/0002_google_signin.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../drizzle/0010_thankful_midnight.sql',import.meta.url),'utf8'));
   const db={
     prepare(sql:string){return {bind(...values:(string|number|null)[]){return {
       async first<T>(){return (sqlite.prepare(sql).get(...values) as T|undefined)??null;},
@@ -149,8 +150,16 @@ test('password change revokes sessions and account deletion removes account reco
   assert.equal((await f.sqlite.prepare('SELECT count(*) AS n FROM password_sessions WHERE user_id=?').get(actor) as {n:number}).n,0);
   assert.equal((await send(f,'login',{email:'alex@microsoft.com',password:'original secure password'})).status,401);
   assert.equal((await send(f,'login',{email:'alex@microsoft.com',password:'replacement secure password'})).status,200);
+  for (const owner of [actor, 'password:other']) {
+   f.sqlite.prepare('INSERT INTO cloud_drive_authorizations (state_hash,owner_id,provider,browser_hash,verifier_ciphertext,return_to,expires_at) VALUES (?,?,?,?,?,?,?)').run(`state-${owner}`,owner,'google_drive','browser-hash','sealed-verifier','/workspace',9999999999);
+   f.sqlite.prepare('INSERT INTO cloud_drive_connections (id,owner_id,provider,root_id,root_name,account_id,account_label,token_ciphertext,token_expires_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(`drive-${owner}`,owner,'google_drive','root','My Drive','provider-account','Example account','sealed-token',9999999999,'connected',1,1);
+  }
   const deleted=await send(f,'delete-account',{password:'replacement secure password'},actor);assert.equal(deleted.status,200);
   assert.equal((await f.sqlite.prepare('SELECT count(*) AS n FROM password_accounts WHERE user_id=?').get(actor) as {n:number}).n,0);
+  for (const table of ['cloud_drive_authorizations', 'cloud_drive_connections']) {
+   assert.equal((f.sqlite.prepare(`SELECT count(*) AS n FROM ${table} WHERE owner_id=?`).get(actor) as {n:number}).n,0);
+   assert.equal((f.sqlite.prepare(`SELECT count(*) AS n FROM ${table} WHERE owner_id=?`).get('password:other') as {n:number}).n,1);
+  }
  } finally{f.sqlite.close();}
 });
 

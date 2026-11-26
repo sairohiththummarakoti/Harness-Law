@@ -1,9 +1,63 @@
 import type { EvidenceDeletionJob, EvidenceObjectRow, EvidenceStorageDependencies } from './evidence-storage.ts';
+import type { EvidenceObjectCatalog } from './evidence-blob-store.ts';
 
 type StoredRow = { id: string; owner_id: string; case_id: string; object_key: string; metadata_json: string; created_at: string; deleted_at: string | null };
 type JobRow = { id: string; owner_id: string; case_id: string; target_kind: 'file' | 'folder'; target_id: string; expected_revision: number; object_keys_json: string; deleted_files: number; deleted_folders: number; created_at: string; completed_at: string | null };
 const objectRow = (row: StoredRow): EvidenceObjectRow => ({ id: row.id, ownerId: row.owner_id, caseId: row.case_id, objectKey: row.object_key, metadata: JSON.parse(row.metadata_json), createdAt: row.created_at, deletedAt: row.deleted_at });
 const jobRow = (row: JobRow): EvidenceDeletionJob => ({ id: row.id, ownerId: row.owner_id, caseId: row.case_id, target: { kind: row.target_kind, id: row.target_id }, expectedRevision: row.expected_revision, objectKeys: JSON.parse(row.object_keys_json), deletedFiles: row.deleted_files, deletedFolders: row.deleted_folders, createdAt: row.created_at, completedAt: row.completed_at });
+
+/** Storage metadata stays server-side and outlives the case attachment for cleanup. */
+export function createEvidenceObjectCatalog(db: Pick<D1Database, 'prepare' | 'batch'>): EvidenceObjectCatalog {
+  return {
+    async read(key) {
+      const rows = await db.prepare('SELECT * FROM evidence_objects WHERE object_key = ? LIMIT 2').bind(key).all<StoredRow>();
+      if (rows.results.length > 1) throw new Error('Ambiguous evidence storage identity.');
+      return rows.results[0] ? objectRow(rows.results[0]) : null;
+    },
+    async pinS3Version(row, version, contentHash) {
+      if (!version || version.length > 1024 || !/^[a-f0-9]{64}$/.test(contentHash)) throw new Error('Invalid storage receipt.');
+      // Never change the readable version. A late writer after a tombstone may
+      // add another receipt, so durable deletion can remove every known version.
+      const receipt = db.prepare(`UPDATE evidence_objects SET metadata_json = json_set(metadata_json,
+        '$.storageBackend', 's3', '$.storageVersion', COALESCE(json_extract(metadata_json, '$.storageVersion'), ?),
+        '$.contentHash', ?, '$.storageVersions', json(CASE
+          WHEN EXISTS (SELECT 1 FROM json_each(metadata_json, '$.storageVersions') WHERE value = ?)
+          THEN COALESCE(json_extract(metadata_json, '$.storageVersions'), '[]')
+          ELSE json_insert(COALESCE(json_extract(metadata_json, '$.storageVersions'), '[]'), '$[#]', ?) END))
+        WHERE id = ? AND owner_id = ? AND case_id = ? AND object_key = ?
+        AND (json_extract(metadata_json, '$.contentHash') IS NULL OR json_extract(metadata_json, '$.contentHash') = ?)
+        AND (json_extract(metadata_json, '$.storageBackend') IS NULL OR json_extract(metadata_json, '$.storageBackend') = 's3')
+        AND (json_extract(metadata_json, '$.storageVersion') IS NULL OR json_extract(metadata_json, '$.storageVersion') = ? OR deleted_at IS NOT NULL)`)
+        .bind(version, contentHash, version, version, row.id, row.ownerId, row.caseId, row.objectKey, contentHash, version);
+      const saved = await db.batch([receipt,
+        db.prepare(`UPDATE evidence_deletions SET completed_at = NULL WHERE owner_id = ? AND case_id = ?
+          AND EXISTS (SELECT 1 FROM json_each(object_keys_json) WHERE value = ?)
+          AND EXISTS (SELECT 1 FROM evidence_objects WHERE id = ? AND owner_id = ? AND case_id = ? AND deleted_at IS NOT NULL)`)
+          .bind(row.ownerId, row.caseId, row.objectKey, row.id, row.ownerId, row.caseId),
+      ]);
+      if (saved[0].meta.changes !== 1) throw new Error('Storage receipt did not match its reservation.');
+    },
+    async pinR2Backend(row) {
+      if (row.objectKey.startsWith('s3:')) throw new Error('Evidence backend mismatch.');
+      const saved = await db.prepare(`UPDATE evidence_objects SET metadata_json = json_set(metadata_json, '$.storageBackend', 'r2')
+        WHERE id = ? AND owner_id = ? AND case_id = ? AND object_key = ?
+        AND (json_extract(metadata_json, '$.storageBackend') IS NULL OR json_extract(metadata_json, '$.storageBackend') = 'r2')`)
+        .bind(row.id, row.ownerId, row.caseId, row.objectKey).run();
+      if (saved.meta.changes !== 1) throw new Error('Storage receipt did not match its reservation.');
+    },
+    async markS3VersionDeleted(row, version) {
+      const saved = await db.prepare(`UPDATE evidence_objects SET metadata_json = json_set(metadata_json,
+        '$.storageDeletedVersions', json(CASE
+          WHEN EXISTS (SELECT 1 FROM json_each(metadata_json, '$.storageDeletedVersions') WHERE value = ?)
+          THEN COALESCE(json_extract(metadata_json, '$.storageDeletedVersions'), '[]')
+          ELSE json_insert(COALESCE(json_extract(metadata_json, '$.storageDeletedVersions'), '[]'), '$[#]', ?) END))
+        WHERE id = ? AND owner_id = ? AND case_id = ? AND object_key = ?
+        AND EXISTS (SELECT 1 FROM json_each(metadata_json, '$.storageVersions') WHERE value = ?)`)
+        .bind(version, version, row.id, row.ownerId, row.caseId, row.objectKey, version).run();
+      if (saved.meta.changes !== 1) throw new Error('Deleted version did not match its storage receipt.');
+    },
+  };
+}
 
 export function createEvidenceRepository(db: D1Database): Pick<EvidenceStorageDependencies, 'repository' | 'deletions'> {
   async function readObject(ownerId: string, caseId: string, objectId: string): Promise<EvidenceObjectRow | null> {
@@ -35,6 +89,25 @@ export function createEvidenceRepository(db: D1Database): Pick<EvidenceStorageDe
         const saved = await db.prepare('UPDATE cases SET revision = ?, state_json = ?, updated_at = ? WHERE owner_id = ? AND case_id = ? AND revision = ?').bind(state.revision, JSON.stringify(state), state.updatedAt, ownerId, caseId, expectedRevision).run();
         return saved.meta.changes === 1;
       },
+      async renameObject(ownerId, caseId, objectId, expectedRevision, name, state) {
+        const results = await db.batch([
+          db.prepare(`UPDATE evidence_objects SET metadata_json = json_set(metadata_json,
+            '$.uploadOriginalName', COALESCE(json_extract(metadata_json, '$.uploadOriginalName'), json_extract(metadata_json, '$.name')), '$.name', ?)
+            WHERE id = ? AND owner_id = ? AND case_id = ? AND deleted_at IS NULL
+            AND EXISTS (SELECT 1 FROM cases, json_each(cases.state_json, '$.documents') document
+              WHERE cases.owner_id = ? AND cases.case_id = ? AND cases.revision = ?
+              AND json_extract(document.value, '$.objectId') = ? AND json_extract(document.value, '$.sample') = 0)`)
+            .bind(name, objectId, ownerId, caseId, ownerId, caseId, expectedRevision, objectId),
+          db.prepare(`UPDATE cases SET revision = ?, state_json = ?, updated_at = ?
+            WHERE owner_id = ? AND case_id = ? AND revision = ?
+            AND EXISTS (SELECT 1 FROM evidence_objects WHERE id = ? AND owner_id = ? AND case_id = ?
+              AND deleted_at IS NULL AND json_extract(metadata_json, '$.name') = ?)
+            AND EXISTS (SELECT 1 FROM json_each(cases.state_json, '$.documents') document
+              WHERE json_extract(document.value, '$.objectId') = ? AND json_extract(document.value, '$.sample') = 0)`)
+            .bind(state.revision, JSON.stringify(state), state.updatedAt, ownerId, caseId, expectedRevision, objectId, ownerId, caseId, name, objectId),
+        ]);
+        return results[1].meta.changes === 1;
+      },
     },
     deletions: {
       readJob,
@@ -63,7 +136,13 @@ export function createEvidenceRepository(db: D1Database): Pick<EvidenceStorageDe
         return result[1].meta.changes === 1;
       },
       async complete(job) {
-        await db.prepare('UPDATE evidence_deletions SET completed_at = ? WHERE id = ? AND owner_id = ? AND case_id = ?').bind(new Date().toISOString(), job.id, job.ownerId, job.caseId).run();
+        const saved = await db.prepare(`UPDATE evidence_deletions SET completed_at = ? WHERE id = ? AND owner_id = ? AND case_id = ?
+          AND NOT EXISTS (SELECT 1 FROM evidence_objects object, json_each(object.metadata_json, '$.storageVersions') version
+            WHERE object.owner_id = ? AND object.case_id = ?
+            AND object.object_key IN (SELECT value FROM json_each(evidence_deletions.object_keys_json))
+            AND NOT EXISTS (SELECT 1 FROM json_each(object.metadata_json, '$.storageDeletedVersions') removed WHERE removed.value = version.value))`)
+          .bind(new Date().toISOString(), job.id, job.ownerId, job.caseId, job.ownerId, job.caseId).run();
+        return saved.meta.changes === 1;
       },
       async requeueObject(ownerId, caseId, objectKey) {
         await db.prepare('UPDATE evidence_deletions SET completed_at = NULL WHERE owner_id = ? AND case_id = ? AND EXISTS (SELECT 1 FROM json_each(object_keys_json) WHERE value = ?)').bind(ownerId, caseId, objectKey).run();

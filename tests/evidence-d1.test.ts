@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import test from 'node:test';
-import { createEvidenceRepository } from '../lib/evidence-d1.ts';
+import { createEvidenceObjectCatalog, createEvidenceRepository } from '../lib/evidence-d1.ts';
 import { applyAction, createEmptyCase, type CaseState } from '../lib/model.ts';
 import { handleEvidenceDelete, type EvidenceDeletionJob, type EvidenceObjectRow, type EvidenceStorageDependencies } from '../lib/evidence-storage.ts';
 
@@ -36,7 +36,7 @@ function fixture() {
   const adapter = createEvidenceRepository(db), repository = adapter.repository, deletions = adapter.deletions!;
   const state = createEmptyCase(); state.id = CASE; state.consent = true;
   sqlite.prepare('INSERT INTO cases (owner_id, case_id, revision, state_json, updated_at) VALUES (?, ?, ?, ?, ?)').run(OWNER, CASE, 0, JSON.stringify(state), AT);
-  return { sqlite, tracker, repository, deletions, state };
+  return { sqlite, tracker, repository, deletions, state, catalog: createEvidenceObjectCatalog(db) };
 }
 
 function object(id: string, replacement: string | null = null): EvidenceObjectRow {
@@ -114,4 +114,73 @@ test('D1 empty folder deletion stores an empty JSON key list and can complete cl
   assert.equal(await f.deletions.commit(job, [], [], next), true);
   assert.deepEqual((await f.deletions.readJob(OWNER, CASE, job.id))?.objectKeys, []);
   await f.deletions.complete(job); assert.equal((await f.deletions.pendingJobs(OWNER)).length, 0);
+});
+
+test('D1 storage catalogue pins versions once and retains late receipts only after tombstoning', async t => {
+  const f = fixture(); t.after(() => f.sqlite.close());
+  const original = object('s3-original'); original.objectKey = 's3:users/owner/Awards/files/folder/original'; original.metadata.storageBackend = 's3';
+  await f.repository.registerObject(original, 0);
+  await f.catalog.pinS3Version(original, 'v1', 'a'.repeat(64));
+  await f.catalog.pinS3Version(original, 'v1', 'a'.repeat(64));
+  assert.deepEqual((await f.catalog.read(original.objectKey))?.metadata.storageVersions, ['v1']);
+  await assert.rejects(f.catalog.pinS3Version(original, 'v2', 'a'.repeat(64)));
+  await assert.rejects(f.catalog.pinS3Version(original, 'v1', 'b'.repeat(64)));
+  await assert.rejects(f.catalog.pinS3Version({ ...original, ownerId: 'other' }, 'v1', 'a'.repeat(64)));
+  f.sqlite.prepare('UPDATE evidence_objects SET deleted_at=? WHERE id=?').run(AT, original.id);
+  await f.catalog.pinS3Version(original, 'v2', 'a'.repeat(64));
+  const stored = await f.catalog.read(original.objectKey);
+  assert.equal(stored?.metadata.storageVersion, 'v1'); assert.deepEqual(stored?.metadata.storageVersions, ['v1', 'v2']);
+});
+
+test('D1 legacy backend discovery is durable and cannot change an explicit backend', async t => {
+  const f = fixture(); t.after(() => f.sqlite.close());
+  const original = object('legacy'); original.objectKey = 'users/legacy-user/evidence.txt';
+  await f.repository.registerObject(original, 0);
+  await f.catalog.pinR2Backend(original); await f.catalog.pinR2Backend(original);
+  assert.equal((await f.catalog.read(original.objectKey))?.metadata.storageBackend, 'r2');
+  await assert.rejects(f.catalog.pinS3Version(original, 'v1', 'a'.repeat(64)));
+});
+
+test('D1 rename changes metadata and case together while preserving storage and original upload name', async t => {
+  const f = fixture(); t.after(() => f.sqlite.close()); const original = object('rename-original');
+  await f.repository.registerObject(original, 0);
+  const { contentHash: _hash, uploadReplacementSourceId: _replacement, ...document } = original.metadata;
+  const state = structuredClone(f.state); state.documents = [document]; state.revision = 1;
+  assert.equal(await f.repository.saveCase(OWNER, CASE, 0, state), true);
+  const next = structuredClone(state); next.documents[0].name = 'renamed.txt'; next.revision = 2;
+  assert.equal(await f.repository.renameObject!(OWNER, CASE, original.id, 1, 'renamed.txt', next), true);
+  const stored = await f.repository.readObject(OWNER, CASE, original.id);
+  assert.equal(stored?.metadata.name, 'renamed.txt'); assert.equal(stored?.metadata.uploadOriginalName, 'rename-original.txt'); assert.equal(stored?.objectKey, original.objectKey);
+  assert.equal((await f.repository.readCase(OWNER))?.documents[0].name, 'renamed.txt');
+  const stale = structuredClone(next); stale.documents[0].name = 'stale.txt';
+  assert.equal(await f.repository.renameObject!(OWNER, CASE, original.id, 1, 'stale.txt', stale), false);
+  assert.equal((await f.repository.readObject(OWNER, CASE, original.id))?.metadata.name, 'renamed.txt');
+});
+
+test('D1 rename transaction rolls back metadata when its case update fails', async t => {
+  const f = fixture(); t.after(() => f.sqlite.close()); const original = object('rename-rollback'); await f.repository.registerObject(original, 0);
+  const { contentHash: _hash, uploadReplacementSourceId: _replacement, ...document } = original.metadata;
+  const state = structuredClone(f.state); state.documents = [document]; state.revision = 1;
+  await f.repository.saveCase(OWNER, CASE, 0, state);
+  const next = structuredClone(state); next.revision = 2; next.documents[0].name = 'renamed.txt';
+  f.tracker.failAt = 1;
+  await assert.rejects(f.repository.renameObject!(OWNER, CASE, original.id, 1, 'renamed.txt', next));
+  assert.equal((await f.repository.readObject(OWNER, CASE, original.id))?.metadata.name, 'rename-rollback.txt');
+  assert.equal((await f.repository.readCase(OWNER))?.revision, 1);
+});
+
+test('D1 cleanup cannot finish while a late S3 version remains and pinning atomically requeues completed cleanup', async t => {
+  const f = fixture(); t.after(() => f.sqlite.close()); const { original, state } = await seedSource(f);
+  await f.catalog.pinS3Version(original, 'v1', 'a'.repeat(64));
+  const { job, next } = deletion(state);
+  assert.equal(await f.deletions.commit(job, ['original'], ['original'], next), true);
+  assert.equal(await f.deletions.complete(job), false);
+  await f.catalog.markS3VersionDeleted(original, 'v1');
+  assert.equal(await f.deletions.complete(job), true);
+  assert.ok((await f.deletions.readJob(OWNER, CASE, job.id))?.completedAt);
+  await f.catalog.pinS3Version(original, 'v2', 'a'.repeat(64));
+  assert.equal((await f.deletions.readJob(OWNER, CASE, job.id))?.completedAt, null);
+  assert.equal(await f.deletions.complete(job), false);
+  await f.catalog.markS3VersionDeleted(original, 'v2');
+  assert.equal(await f.deletions.complete(job), true);
 });

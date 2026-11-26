@@ -130,11 +130,12 @@ async function hmac(key: Uint8Array, message: string): Promise<Uint8Array> {
 const uriEncode = (value: string) => encodeURIComponent(value).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 
 /** S3 Signature V4, immutable keys, pinned object versions, verified SHA-256 on every read. */
-export function createS3Store(config: S3Config, runtime: Pick<ProviderRuntime, 'fetch' | 'now' | 'timeoutMs'> = {}): ObjectStore {
+export function createS3Store(config: S3Config, runtime: Pick<ProviderRuntime, 'fetch' | 'now' | 'timeoutMs'> & { maxObjectBytes?: number } = {}): ObjectStore {
   if (!config.bucket || !config.region || !config.accessKeyId || !config.secretAccessKey || !/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(config.bucket)) throw new ProviderError('storage_not_configured', 'Private S3 storage is not configured.');
   const endpoint = httpsUrl(config.endpoint || `https://${config.bucket}.s3.${config.region}.amazonaws.com`);
   if (endpoint.pathname !== '/') throw new ProviderError('storage_not_configured', 'The S3 endpoint must not contain a path.');
   const fetcher = runtime.fetch || fetch;
+  const maxObjectBytes = Math.max(1, Math.min(runtime.maxObjectBytes ?? 50 * 1024 * 1024, 50 * 1024 * 1024));
   async function request(method: string, key: string, bytes?: Uint8Array, contentType?: string, version?: string): Promise<Response> {
     opaqueKey(key);
     const path = '/' + (config.endpoint ? uriEncode(config.bucket) + '/' : '') + key.split('/').map(uriEncode).join('/');
@@ -170,7 +171,7 @@ export function createS3Store(config: S3Config, runtime: Pick<ProviderRuntime, '
     if ((config.requireVersionId !== false && (!returnedVersion || returnedVersion === 'null')) || (version && returnedVersion !== version)) {
       await response.body?.cancel(); throw new ProviderError('object_version_mismatch', 'The requested immutable object version is unavailable.', 409);
     }
-    const bytes = await boundedBytes(response, 50 * 1024 * 1024), digest = await sha256(bytes);
+    const bytes = await boundedBytes(response, maxObjectBytes), digest = await sha256(bytes);
     const storedDigest = response.headers.get('x-amz-meta-sha256');
     const nativeChecksum = response.headers.get('x-amz-checksum-sha256');
     if (!storedDigest || storedDigest !== digest || (nativeChecksum && nativeChecksum !== digestBase64(digest))) throw new ProviderError('storage_integrity_failure', 'Private object integrity validation failed.', 422);
@@ -178,6 +179,7 @@ export function createS3Store(config: S3Config, runtime: Pick<ProviderRuntime, '
   }
   return {
     async put(key, bytes, contentType) {
+      if (!bytes.length || bytes.length > maxObjectBytes) throw new ProviderError('invalid_size', 'The private object exceeds its configured size limit.', 422);
       const digest = await sha256(bytes), response = await request('PUT', key, bytes, contentType);
       if (response.status === 412) {
         await response.body?.cancel(); const existing = await get(key);

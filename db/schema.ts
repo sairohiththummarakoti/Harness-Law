@@ -12,6 +12,9 @@ export const accountIntakeEntries=sqliteTable('account_intake_entries',{
   ownerId:text('owner_id').primaryKey(),
   firstSeenAt:text('first_seen_at').notNull(),
   firstShownAt:text('first_shown_at'),
+  flowVersion:integer('flow_version').notNull().default(1),
+  coreCompletedAt:text('core_completed_at'),
+  evidenceCompletedAt:text('evidence_completed_at'),
 });
 
 export const evidenceObjects=sqliteTable('evidence_objects',{
@@ -162,3 +165,33 @@ export const uscisSourceSnapshots=sqliteTable('uscis_source_snapshots',{
   checkedAt:integer('checked_at').notNull().default(0),
   leaseUntil:integer('lease_until').notNull().default(0),
 });
+
+export const cloudDriveConnections = sqliteTable('cloud_drive_connections', {
+  id: text('id').primaryKey(),
+  ownerId: text('owner_id').notNull(),
+  provider: text('provider').notNull(),
+  displayName: text('display_name').notNull().default(''),
+  scope: text('scope').notNull().default('whole_drive'),
+  rootId: text('root_id').notNull(),
+  rootName: text('root_name').notNull(),
+  driveId: text('drive_id'),
+  accountId: text('account_id').notNull(),
+  accountLabel: text('account_label').notNull(),
+  tokenCiphertext: text('token_ciphertext').notNull(),
+  tokenExpiresAt: integer('token_expires_at').notNull(),
+  status: text('status').notNull(),
+  caseId: text('case_id'),
+  evidenceFolderId: text('evidence_folder_id'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, table => [index('cloud_drive_owner_status').on(table.ownerId, table.status)]);
+
+export const cloudDriveAuthorizations = sqliteTable('cloud_drive_authorizations', {
+  stateHash: text('state_hash').primaryKey(),
+  ownerId: text('owner_id').notNull(),
+  provider: text('provider').notNull(),
+  browserHash: text('browser_hash').notNull(),
+  verifierCiphertext: text('verifier_ciphertext').notNull(),
+  returnTo: text('return_to').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+}, table => [index('cloud_drive_authorization_expiry').on(table.expiresAt)]);

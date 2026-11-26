@@ -1,5 +1,7 @@
 import { authCookie, authJson, cookieNames, cookieSecurityForUrl, isSameOrigin, randomToken, readAuthBody, tokenHash } from './runtime.ts';
 import { createR2Store, createS3Store } from '../integrations/providers.ts';
+import { createConfiguredEvidenceBlobStore } from '../evidence-blob-store.ts';
+import { createEvidenceObjectCatalog } from '../evidence-d1.ts';
 import type { ObjectStore } from '../integrations/provider-contracts.ts';
 // @ts-ignore Node's built-in test runner requires explicit TypeScript extensions.
 import { firebaseSignUp, firebaseSendEmailVerification, firebaseVerifyEmail, firebaseSignIn, firebaseLookupUser, firebaseSendPasswordReset, firebaseConfirmPasswordReset, firebaseDeleteUser, firebaseUpdatePassword, FirebaseAuthError, type FirebaseAuthConfig } from './firebase.ts';
@@ -615,19 +617,17 @@ export async function handlePasswordAuth(request: Request, env: PasswordAuthEnv,
           if (value?.key) keys.set(value.key, value.version);
         }
         if (keys.size && !integrationStore) return jsonError('storage_unavailable', 'Integration object storage cleanup needs configuration. Account was retained.', 503);
-        for (const row of legacy.results) {
-          if (s3Configured && integrationStore) await integrationStore.delete(row.object_key);
-          else if (env.BUCKET) await env.BUCKET.delete(row.object_key);
-        }
         for (const [key, version] of keys) await integrationStore!.delete(key, version);
-      } else {
-        for (const row of legacy.results) {
-          if (s3Configured && integrationStore) await integrationStore.delete(row.object_key);
-          else if (env.BUCKET) await env.BUCKET.delete(row.object_key);
-        }
       }
 
+      const evidenceStore = createConfiguredEvidenceBlobStore(env as unknown as Record<string, unknown>, createEvidenceObjectCatalog(env.DB));
+      if (legacy.results.length) {
+        if (!evidenceStore?.delete) throw new Error('Evidence storage cleanup is unavailable.');
+        await evidenceStore.delete(legacy.results.map(row => row.object_key));
+      }
       const statements = [
+        env.DB.prepare('DELETE FROM cloud_drive_authorizations WHERE owner_id=?').bind(actorId),
+        env.DB.prepare('DELETE FROM cloud_drive_connections WHERE owner_id=?').bind(actorId),
         env.DB.prepare('DELETE FROM email_challenges WHERE user_id=?').bind(actorId),
         env.DB.prepare('DELETE FROM password_sessions WHERE user_id=?').bind(actorId),
         env.DB.prepare('DELETE FROM evidence_objects WHERE owner_id=?').bind(actorId),

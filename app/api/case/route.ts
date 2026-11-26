@@ -5,12 +5,13 @@ import { MAX_CASE_BODY, readLimitedBody, saveSchema } from '@/lib/validation';
 import type { CaseState } from '@/lib/model';
 import { resumeEvidenceDeletions } from '@/lib/evidence-storage';
 import { evidenceStorageDependencies } from '@/lib/evidence-repository';
+import { getAccountFlow } from '@/lib/intake-entry';
 export const dynamic='force-dynamic';
 
 export async function GET(request:Request){
   const user=await getAppUser();if(!user)return json({error:'Sign in to open your saved case.',code:'session_expired'},401);
   if(!matchesExpectedAccount(request,user.userId))return json({error:"Your session changed. Sign in to the account used in this tab before continuing.",code:"session_changed"},401);
-  try{await resumeEvidenceDeletions(user.userId,evidenceStorageDependencies());const row=await readCase(user.userId);const state=row?parseCase(row):await initialCase(user.userId);return json({state,revision:state.revision});}
+  try{await getAccountFlow(database(),user.userId);await resumeEvidenceDeletions(user.userId,evidenceStorageDependencies());const row=await readCase(user.userId);const state=row?parseCase(row):await initialCase(user.userId);return json({state,revision:state.revision});}
   catch{return json({error:'Case storage is temporarily unavailable. Your unsaved changes have not been marked saved.',code:'storage_unavailable'},503);}
 }
 export async function PUT(request:Request){
@@ -20,6 +21,9 @@ export async function PUT(request:Request){
   if(!request.headers.get('content-type')?.includes('application/json'))return json({error:'Send case updates as JSON.'},415);
   const length=Number(request.headers.get('content-length')||0);if(length>MAX_CASE_BODY)return json({error:'This case is too large to save in one request.'},413);
   try{
+    // Enroll before the first case is created; an empty case cannot bypass the
+    // required introduction by being saved directly through this endpoint.
+    await getAccountFlow(database(),user.userId);
     const bytes=await readLimitedBody(request,MAX_CASE_BODY);if(!bytes)return json({error:'This case is too large to save in one request.'},413);
     const body=new TextDecoder().decode(bytes);
     let decoded:unknown;try{decoded=JSON.parse(body);}catch{return json({error:'The case update contains invalid JSON.'},400);}

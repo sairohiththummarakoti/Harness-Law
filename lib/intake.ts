@@ -11,6 +11,22 @@ export interface IntakeAnswers {
 }
 export interface CaseIntake { version: 1; step: IntakeStep; answers: IntakeAnswers; completedAt?: string; firstCompletedAt?: string }
 
+export const REQUIRED_INTAKE_STEPS: readonly IntakeStep[] = ['basics', 'visa', 'birth', 'citizenships'];
+
+/** The initial introduction requires only these four questions. Later details may be finished from Overview. */
+export function requiredIntakeError(answers: IntakeAnswers): string | null {
+  for (const step of REQUIRED_INTAKE_STEPS) {
+    const error = intakeStepError(answers, step);
+    if (error) return error;
+  }
+  return null;
+}
+
+export function hasCompletedRequiredIntake(state: Pick<CaseState, 'intake'>): boolean {
+  return !!state.intake && ['background', 'criteria', 'review'].includes(state.intake.step)
+    && !requiredIntakeError(state.intake.answers);
+}
+
 export const INTAKE_STEP_FIELDS: Record<IntakeStep, readonly (keyof IntakeAnswers)[]> = {
   basics: ['fullName', 'phone', 'helpFor'], visa: ['visaType'], birth: ['birthCountry', 'birthCountryOther'],
   citizenships: ['citizenships'], background: ['field', 'role'],
@@ -142,16 +158,21 @@ export function applyIntakeStep(state: CaseState, step: IntakeStep, answers: Int
   const steps = getIntakeSteps(merged.visaType);
   const nextStep = steps[Math.min(steps.indexOf(step) + 1, steps.length - 1)];
   if (step === 'review') return finishIntake(state, merged);
-  const next = structuredClone(state);
+  // Make the required introduction usable in the workspace even when the
+  // optional professional questions are deferred. Never overwrite newer work
+  // with old optional answers while synchronizing these first four questions.
+  const next = step === 'citizenships' && !hasCompletedRequiredIntake(state)
+    ? syncIntakeFields(state, merged, ['fullName', 'phone'])
+    : structuredClone(state);
   const firstCompletedAt = firstCompletion(state);
   next.intake = { version: 1, step: nextStep, answers: merged, ...(firstCompletedAt ? { firstCompletedAt } : {}) };
   next.updatedAt = new Date().toISOString();
   return next;
 }
 
-/** Save one correction to a previously completed intake without replaying valid questions. */
+/** Save a correction after the required introduction without replaying valid questions. */
 export function applyIntakeEdit(state: CaseState, step: IntakeStep, answers: IntakeAnswers): CaseState {
-  if (!firstCompletion(state)) throw new Error('Complete your first intake before editing saved answers.');
+  if (!firstCompletion(state) && !hasCompletedRequiredIntake(state)) throw new Error('Complete your first intake before editing saved answers.');
   const current = intakeAnswersFromCase(state);
   const next = applyIntakeStep(state, step, answers);
   const merged = next.intake!.answers;

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyAction, createEmptyCase, createSampleCase, type CaseState, type Evidence } from '../lib/model.ts';
 import { MAX_FILE_BYTES } from '../lib/validation.ts';
-import { attachmentDisposition, handleEvidenceDelete, handleEvidenceRead, handleEvidenceUpload, resumeEvidenceDeletions, type EvidenceDeletionJob, type EvidenceObjectRow, type EvidenceStorageDependencies } from '../lib/evidence-storage.ts';
+import { attachmentDisposition, handleEvidenceDelete, handleEvidenceRead, handleEvidenceRename, handleEvidenceUpload, resumeEvidenceDeletions, type EvidenceDeletionJob, type EvidenceObjectRow, type EvidenceStorageDependencies } from '../lib/evidence-storage.ts';
 
 const OWNER = 'google:applicant';
 const UPLOAD_ID = '4a752850-571d-4e35-a823-4ef193a7add0';
@@ -31,6 +31,13 @@ function fixture() {
         tracker.saves++; tracker.beforeSave?.();
         const current = cases.get(ownerId);
         if (!current || current.id !== caseId || current.revision !== expectedRevision) return false;
+        cases.set(ownerId, structuredClone(state)); return true;
+      },
+      async renameObject(ownerId, caseId, objectId, expectedRevision, name, state) {
+        tracker.beforeSave?.();
+        const current = cases.get(ownerId), row = objects.get(objectId);
+        if (!current || current.id !== caseId || current.revision !== expectedRevision || !row || row.ownerId !== ownerId || row.caseId !== caseId || row.deletedAt || !current.documents.some(document => document.objectId === objectId)) return false;
+        row.metadata.uploadOriginalName ||= row.metadata.name; row.metadata.name = name;
         cases.set(ownerId, structuredClone(state)); return true;
       },
     },
@@ -382,4 +389,65 @@ test('sample recursive deletion invalidates dependent drafts and removes source 
   assert.equal(next.facts.some(fact => fact.sourceId === source.id), false);
   for (const criterion of dependent) assert.equal(next.runs[criterion].result?.stale, true);
   assert.equal(state.documents.length, 6); assert.equal(state.folders.length, 3);
+});
+
+test('S3 reservations follow the selected folder and stay stable after folder rename and CAS retry', async () => {
+  const f = fixture(); f.deps.store!.uploadBackend = 's3';
+  f.current().folders = [{ id: 'awards', name: 'My Awards', parentId: null }];
+  f.tracker.beforeSave = () => { f.current().revision = 1; f.current().folders![0].name = 'Renamed'; f.tracker.beforeSave = undefined; };
+  assert.equal((await handleEvidenceUpload(upload({ folderId: 'awards' }), f.deps)).status, 409);
+  const key = [...f.objects.values()][0].objectKey;
+  assert.match(key, /^s3:users\/[a-f0-9]{64}\/My-Awards\/files\/[a-f0-9]{64}\/upload-/);
+  const body = await uploaded(f, { folderId: 'awards', revision: 1 });
+  assert.equal([...f.objects.values()][0].objectKey, key); assert.equal(f.tracker.writes, 1);
+  for (const field of ['storageBackend', 'storageVersion', 'storageVersions', 'contentHash', 'uploadOriginalName']) assert.equal(field in body.document, false);
+});
+
+test('replacement of an R2 original may use S3 while deletion cleans both registered locators', async () => {
+  const f = fixture(); const original = await uploaded(f);
+  f.deps.store!.uploadBackend = 's3';
+  const replacement = await uploaded(f, { revision: 1, uploadId: '5b752850-571d-4e35-a823-4ef193a7add1', replacementSourceId: original.document.id });
+  assert.match(f.objects.get(original.document.objectId!)!.objectKey, /^quarantine\//);
+  assert.match(f.objects.get(replacement.document.objectId!)!.objectKey, /^s3:users\//);
+  assert.equal((await handleEvidenceDelete(remove({ kind: 'file', id: original.document.id }, 2), f.deps)).status, 200);
+  assert.equal(f.blobs.size, 0); assert.equal([...f.jobs.values()][0].objectKeys.length, 2);
+});
+
+function rename(objectId: string, name: string, expectedRevision = 1, options: { account?: string; origin?: string; caseId?: string } = {}) {
+  return new Request('https://app.test/api/evidence', { method: 'PATCH', headers: { Origin: options.origin ?? 'https://app.test', 'X-Harness-Account': options.account ?? OWNER, 'Content-Type': 'application/json' }, body: JSON.stringify({ objectId, name, expectedRevision, caseId: options.caseId ?? 'case-current' }) });
+}
+
+test('rename updates case and download filename without changing object identity and supports original upload retry', async () => {
+  const f = fixture(); const original = await uploaded(f);
+  const key = [...f.objects.values()][0].objectKey;
+  const response = await handleEvidenceRename(rename(original.document.objectId!, 'Updated profile.txt'), f.deps);
+  const body = await responseBody(response);
+  assert.equal(response.status, 200); assert.equal(body.revision, 2); assert.equal(body.document.name, 'Updated profile.txt');
+  assert.equal(f.objects.get(original.document.objectId!)!.metadata.name, 'Updated profile.txt');
+  assert.equal([...f.objects.values()][0].objectKey, key); assert.equal(f.tracker.writes, 1);
+  const download = await handleEvidenceRead(read(original.document.objectId!), f.deps);
+  assert.match(download.headers.get('content-disposition')!, /Updated profile.txt/);
+  const retry = await handleEvidenceUpload(upload(), f.deps);
+  assert.equal(retry.status, 200); assert.equal((await responseBody(retry)).document.name, 'Updated profile.txt');
+  assert.equal((await handleEvidenceRename(rename(original.document.objectId!, 'Updated profile.txt'), f.deps)).status, 200);
+  assert.equal(f.current().revision, 2);
+});
+
+test('rename rejects cross-account, invalid origin, extension changes, unsafe names and stale revisions', async () => {
+  const f = fixture(); const original = await uploaded(f), id = original.document.objectId!;
+  for (const [request, status] of [
+    [rename(id, 'New.txt', 1, { account: 'other' }), 401],
+    [rename(id, 'New.txt', 1, { origin: 'https://foreign.test' }), 403],
+    [rename(id, 'New.pdf'), 422], [rename(id, '../New.txt'), 422], [rename(id, 'New\n.txt'), 422],
+    [rename(id, 'New.txt', 0), 409], [rename('missing', 'New.txt'), 404],
+  ] as const) assert.equal((await handleEvidenceRename(request, f.deps)).status, status);
+  assert.equal(f.current().documents[0].name, 'profile.txt'); assert.equal(f.current().revision, 1);
+});
+
+test('concurrent rename CAS failure cannot change registered object metadata', async () => {
+  const f = fixture(); const original = await uploaded(f);
+  f.tracker.beforeSave = () => { f.current().revision = 2; f.current().name = 'Concurrent case edit'; };
+  const response = await handleEvidenceRename(rename(original.document.objectId!, 'New.txt'), f.deps);
+  assert.equal(response.status, 409); assert.equal((await responseBody(response)).state.name, 'Concurrent case edit');
+  assert.equal(f.objects.get(original.document.objectId!)!.metadata.name, 'profile.txt');
 });

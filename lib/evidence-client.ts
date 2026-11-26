@@ -35,7 +35,7 @@ export async function uploadEvidenceFile(file: File, accountId: string, state: C
   body.append('file', file);
   body.append('caseId', state.id);
   body.append('expectedRevision', String(state.revision));
-  body.append('uploadId', uploadIdentity(file, `${accountId}:${state.id}:${replacementSourceId ?? ''}`));
+  body.append('uploadId', uploadIdentity(file, `${accountId}:${state.id}:${folderId ?? ''}:${replacementSourceId ?? ''}`));
   if (folderId) body.append('folderId', folderId);
   if (replacementSourceId) body.append('replacementSourceId', replacementSourceId);
   // Canceling local parsing cannot undo a storage commit. Always settle retention.
@@ -62,4 +62,14 @@ export async function readEvidenceFile(document: Evidence, accountId: string | n
   const blob = await response.blob();
   if (blob.size > 20 * 1024 * 1024 || blob.size !== document.bytes) throw new Error('The saved file size did not match its record. Please try again.');
   return new File([blob], document.name, { type: 'application/octet-stream' });
+}
+
+export async function renameEvidenceItem(objectId: string, name: string, accountId: string, state: CaseState): Promise<{ state: CaseState; revision: number }> {
+  const response = await fetch('/api/evidence', {
+    method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Harness-Account': accountId },
+    body: JSON.stringify({ caseId: state.id, expectedRevision: state.revision, objectId, name }), signal: AbortSignal.timeout(30000),
+  });
+  const data = await response.json() as { state?: CaseState; revision?: number; error?: string };
+  if (!response.ok || !data.state || data.revision === undefined) throw new EvidenceRequestError(data.error || 'The name could not be saved.', response.status, data.state, data.revision);
+  return { state: data.state, revision: data.revision };
 }
