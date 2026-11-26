@@ -6,42 +6,11 @@ export default function AccountSettings({ email }: { email: string }) {
   const [notice, setNotice] = useState('');
   const [isError, setIsError] = useState(false);
   const [testOnlyLink, setTestOnlyLink] = useState('');
-  const [busyEmail, setBusyEmail] = useState(false);
   const [busyPassword, setBusyPassword] = useState(false);
   const [busyReset, setBusyReset] = useState(false);
   const [busyDelete, setBusyDelete] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showDeletePassword, setShowDeletePassword] = useState(false);
-
-  async function changeEmail(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setNotice('');
-    setIsError(false);
-    setTestOnlyLink('');
-    setBusyEmail(true);
-    const form = new FormData(event.currentTarget);
-    try {
-      const response = await fetch('/api/auth/email/change-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: form.get('email') })
-      });
-      const body = await response.json() as { message?: string; error?: string; testOnlyLink?: string };
-      if (!response.ok) {
-        setIsError(true);
-        setNotice(body.error || 'Failed to request email change.');
-      } else {
-        setNotice(body.message || 'Confirmation sent to new email.');
-        setTestOnlyLink(body.testOnlyLink || '');
-        (event.target as HTMLFormElement).reset();
-      }
-    } catch {
-      setIsError(true);
-      setNotice('Network error. Please try again.');
-    } finally {
-      setBusyEmail(false);
-    }
-  }
 
   async function changePassword(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -139,28 +108,9 @@ export default function AccountSettings({ email }: { email: string }) {
       )}
       {testOnlyLink && (
         <div role="status" className={styles.notice} style={{ marginBottom: 20 }}>
-          Development test link: <a href={testOnlyLink} style={{ color: '#214d3b', textDecoration: 'underline' }}>Confirm email change</a>
+          Development test link: <a href={testOnlyLink} style={{ color: '#214d3b', textDecoration: 'underline' }}>Open reset link</a>
         </div>
       )}
-
-      {/* Change Email */}
-      <div className={styles.card}>
-        <h2>Change email address</h2>
-        <p className={styles.cardDesc}>
-          Current email: <strong>{email}</strong>. A 6-digit confirmation code and link will be sent to your new address. Your current email remains active until you confirm.
-        </p>
-        <form onSubmit={changeEmail}>
-          <label>
-            New email address
-            <input name="email" type="email" required autoComplete="email" placeholder="new.email@example.com" />
-          </label>
-          <div>
-            <button className={styles.btnPrimary} disabled={busyEmail}>
-              {busyEmail ? 'Sending confirmation…' : 'Send confirmation'}
-            </button>
-          </div>
-        </form>
-      </div>
 
       {/* Change Password */}
       <div className={styles.card}>

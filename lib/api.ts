@@ -17,6 +17,27 @@ export function sameOrigin(request:Request):boolean {
   if(!origin)return false;
   try{return new URL(origin).origin===new URL(request.url).origin;}catch{return false;}
 }
+
+export async function userStorageFolder(userId: string, displayName?: string | null): Promise<string> {
+  const rawName = (displayName || 'user').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'user';
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(userId));
+  const shortHash = Array.from(new Uint8Array(digest)).slice(0, 6).map(b => b.toString(16).padStart(2, '0')).join('');
+  return `${rawName}-${shortHash}`;
+}
+
+export function sanitizeSubfolder(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  return raw
+    .split(/[/\\]+/)
+    .map(part => part.trim().replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, ''))
+    .filter(part => part && part !== '.' && part !== '..')
+    .join('/')
+    .slice(0, 120);
+}
+
+export function sanitizeFileSlug(filename: string): string {
+  return filename.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 100) || 'document';
+}
 export async function validateEvidenceOwnership(ownerId:string,state:CaseState):Promise<string|null>{
   const ids=new Set<string>();
   const samples=createSampleCase().documents;

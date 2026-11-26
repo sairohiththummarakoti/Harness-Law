@@ -550,9 +550,9 @@ export async function handlePasswordAuth(request: Request, env: PasswordAuthEnv,
     }
 
     const legacy = await env.DB.prepare('SELECT object_key FROM evidence_objects WHERE owner_id=?').bind(actorId).all<{ object_key: string }>();
-    if (legacy.results.length && !env.BUCKET) return jsonError('storage_unavailable', 'Account data storage is unavailable. No account data was deleted.', 503);
+    const s3Configured = !!(env.HARNESS_S3_BUCKET || env.HARNESS_S3_REGION || env.HARNESS_S3_ACCESS_KEY_ID || env.HARNESS_S3_SECRET_ACCESS_KEY || env.HARNESS_S3_SESSION_TOKEN);
+    if (legacy.results.length && !env.BUCKET && !s3Configured) return jsonError('storage_unavailable', 'Account data storage is unavailable. No account data was deleted.', 503);
     try {
-      const s3Configured = !!(env.HARNESS_S3_BUCKET || env.HARNESS_S3_REGION || env.HARNESS_S3_ACCESS_KEY_ID || env.HARNESS_S3_SECRET_ACCESS_KEY || env.HARNESS_S3_SESSION_TOKEN);
       let integrationStore: ObjectStore | undefined;
       if (s3Configured) {
         if (!env.HARNESS_S3_BUCKET || !env.HARNESS_S3_REGION || !env.HARNESS_S3_ACCESS_KEY_ID || !env.HARNESS_S3_SECRET_ACCESS_KEY) {
@@ -592,10 +592,16 @@ export async function handlePasswordAuth(request: Request, env: PasswordAuthEnv,
           if (value?.key) keys.set(value.key, value.version);
         }
         if (keys.size && !integrationStore) return jsonError('storage_unavailable', 'Integration object storage cleanup needs configuration. Account was retained.', 503);
-        for (const row of legacy.results) await env.BUCKET!.delete(row.object_key);
+        for (const row of legacy.results) {
+          if (s3Configured && integrationStore) await integrationStore.delete(row.object_key);
+          else if (env.BUCKET) await env.BUCKET.delete(row.object_key);
+        }
         for (const [key, version] of keys) await integrationStore!.delete(key, version);
       } else {
-        for (const row of legacy.results) await env.BUCKET!.delete(row.object_key);
+        for (const row of legacy.results) {
+          if (s3Configured && integrationStore) await integrationStore.delete(row.object_key);
+          else if (env.BUCKET) await env.BUCKET.delete(row.object_key);
+        }
       }
 
       const statements = [

@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { getAppUser } from '@/app/auth';
 import { database, json, sameOrigin } from '@/lib/api';
+import { createS3Store } from '@/lib/integrations/providers';
 import { authCookie, clearAuthCookies, cookieNames, cookieSecurityForUrl } from '@/lib/auth/runtime';
 
 export const dynamic = 'force-dynamic';
@@ -17,12 +18,28 @@ export async function POST(request: Request) {
     }
 
     const db = database();
+    const procEnv = typeof process !== 'undefined' ? process.env : undefined;
+    const s3Bucket = env.HARNESS_S3_BUCKET || procEnv?.HARNESS_S3_BUCKET;
+    const s3Region = env.HARNESS_S3_REGION || procEnv?.HARNESS_S3_REGION;
+    const s3Key = env.HARNESS_S3_ACCESS_KEY_ID || procEnv?.HARNESS_S3_ACCESS_KEY_ID;
+    const s3Secret = env.HARNESS_S3_SECRET_ACCESS_KEY || procEnv?.HARNESS_S3_SECRET_ACCESS_KEY;
+    const s3Token = env.HARNESS_S3_SESSION_TOKEN || procEnv?.HARNESS_S3_SESSION_TOKEN;
+    const s3Ready = !!(s3Bucket && s3Region && s3Key && s3Secret);
     const legacy = await db.prepare('SELECT object_key FROM evidence_objects WHERE owner_id = ?').bind(user.userId).all<{ object_key: string }>();
-    if (legacy.results.length && !env.BUCKET) {
+    if (legacy.results.length && !s3Ready && !env.BUCKET) {
       return json({ error: 'Account data storage is unavailable. No account data was deleted.' }, 503);
     }
+    const s3 = s3Ready ? createS3Store({
+      bucket: s3Bucket!,
+      region: s3Region!,
+      accessKeyId: s3Key!,
+      secretAccessKey: s3Secret!,
+      sessionToken: s3Token,
+      requireVersionId: true,
+    }) : null;
     for (const row of legacy.results) {
-      await env.BUCKET!.delete(row.object_key);
+      if (s3) await s3.delete(row.object_key).catch(() => {});
+      if (env.BUCKET) await env.BUCKET.delete(row.object_key).catch(() => {});
     }
 
     const integration = await db.prepare('SELECT case_id FROM integration_cases WHERE owner_id = ?').bind(user.userId).first<{ case_id: string }>();

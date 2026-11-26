@@ -32,7 +32,8 @@ export default function AuthForm({mode}:{mode:"signup"|"signin"|"forgot"|"reset"
 
   useEffect(()=>{
     if(typeof window==="undefined") return;
-    const searchToken = new URLSearchParams(window.location.search).get("token");
+    const params = new URLSearchParams(window.location.search);
+    const searchToken = params.get("token") || params.get("oobCode");
     const hashToken = new URLSearchParams(window.location.hash.slice(1)).get("token");
     const detected = searchToken || hashToken || "";
     if(detected) {

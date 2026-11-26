@@ -10,9 +10,6 @@ interface OAuthEnv {
 
 const PROVIDER_MAP: Record<string, string> = {
   google: 'google.com',
-  microsoft: 'microsoft.com',
-  apple: 'apple.com',
-  github: 'github.com',
 };
 
 const oauthStateCookie = (secure: boolean) => secure ? '__Host-harness_oauth_state' : 'harness_oauth_state_dev';

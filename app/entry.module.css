@@ -538,3 +538,442 @@
     gap: 8px 20px;
   }
 }
+
+/* Split-screen left backdrop panel */
+.backdrop {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background: radial-gradient(circle at 18% 15%, #124a3b 0%, #082f26 58%, #05211a 100%);
+  color: #f5f8ec;
+  padding: 48px clamp(28px, 4vw, 68px);
+  overflow: hidden;
+}
+
+.backdropNav {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #f5f8ec;
+}
+
+.backdropNav svg {
+  color: var(--brand-citrus, #d8ed94);
+}
+
+.backdropNav span {
+  margin-left: 8px;
+  padding-left: 12px;
+  border-left: 1px solid #ffffff30;
+  font-size: 13px;
+  font-weight: 450;
+  color: #c5d7bd;
+}
+
+.backdropContent {
+  margin: auto 0;
+  max-width: 540px;
+}
+
+.entry .backdropContent h2 {
+  font-size: clamp(34px, 3.4vw, 52px);
+  line-height: 1.08;
+  letter-spacing: -1.4px;
+  font-weight: 480;
+  color: #f5f8ec;
+  margin: 0 0 32px;
+}
+
+.backdropCards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.backdropCards > div {
+  background: #ffffff10;
+  border: 1px solid #ffffff20;
+  border-radius: 10px;
+  padding: 18px 16px;
+  backdrop-filter: blur(6px);
+}
+
+.backdropCards svg {
+  color: var(--brand-citrus, #d8ed94);
+  margin-bottom: 12px;
+}
+
+.backdropCards strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: #f5f8ec;
+  margin-bottom: 4px;
+}
+
+.backdropCards p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #c7d8ce;
+}
+
+/* Email / Password Auth Form */
+.emailForm {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.emailForm > label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--brand-ink, #143b2e);
+}
+
+.emailForm input[type="text"],
+.emailForm input[type="email"],
+.emailForm input[type="password"] {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 13px;
+  border: 1px solid #bdcbc0;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--brand-ink, #143b2e);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 450;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.emailForm input[type="text"]:focus,
+.emailForm input[type="email"]:focus,
+.emailForm input[type="password"]:focus {
+  outline: none;
+  border-color: #214d3b;
+  box-shadow: 0 0 0 3px #214d3b1f;
+}
+
+.passwordField {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.passwordField input {
+  padding-right: 68px !important;
+}
+
+.passwordField button {
+  position: absolute;
+  right: 8px;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid #d4dfd7;
+  border-radius: 5px;
+  background: #f5f8f5;
+  color: var(--brand-ink, #143b2e);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.passwordField button:hover {
+  background: #e8efe9;
+}
+
+.fieldHint {
+  font-size: 12.5px;
+  font-weight: 450;
+  color: var(--brand-muted, #52615b);
+  line-height: 1.45;
+}
+
+/* Password Strength Meter */
+.strengthBar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.strengthSegment {
+  height: 4px;
+  border-radius: 4px;
+  background: #e2e9e4;
+  transition: background-color 0.2s ease;
+}
+
+.strengthWeak {
+  background: #d14338;
+}
+
+.strengthMedium {
+  background: #d9901c;
+}
+
+.strengthStrong {
+  background: #237a4b;
+}
+
+.strengthLabel {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 450;
+  color: var(--brand-muted, #52615b);
+  margin-top: 5px;
+}
+
+/* Remember Me & Terms Checkboxes */
+.rememberRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.rememberCheck,
+.termsCheck {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 13.5px;
+  font-weight: 450;
+  line-height: 1.45;
+  color: var(--brand-muted, #52615b);
+  cursor: pointer;
+}
+
+.rememberCheck input,
+.termsCheck input {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  accent-color: #214d3b;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.termsCheck a,
+.formLink {
+  color: var(--brand-ink, #143b2e);
+  font-size: 13.5px;
+  font-weight: 550;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Form Errors, Messages, Resend */
+.formError {
+  padding: 12px 14px;
+  border: 1px solid #e8c7bd;
+  border-radius: 6px;
+  background: #fff6f2;
+  color: #7b3928;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.formMessage {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid #c3d8c8;
+  border-radius: 6px;
+  background: #eef6ef;
+  color: var(--brand-ink, #143b2e);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.formMessage a {
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.unverifiedBtn {
+  padding: 7px 12px;
+  border: 1px solid #7b3928;
+  border-radius: 5px;
+  background: #fff;
+  color: #7b3928;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.resendBox {
+  text-align: center;
+  margin-top: 2px;
+}
+
+.textButton {
+  background: transparent;
+  border: 0;
+  padding: 6px 8px;
+  color: var(--brand-ink, #143b2e);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 550;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+/* OAuth Providers Section */
+.oauthContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.googleContainer {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.oauthNotice {
+  padding: 10px 14px;
+  background: #fff8e6;
+  border: 1px solid #f2db99;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #7a5400;
+}
+
+.oauthNotice p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.oauthNotice button {
+  align-self: flex-end;
+  background: none;
+  border: none;
+  color: #523800;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.oauthBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid #c7d5cb;
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--brand-ink, #143b2e);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.oauthBtn:hover {
+  background: #f5f8f5;
+  border-color: #8aa493;
+}
+
+.oauthRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+.oauthBtnSecondary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid #c7d5cb;
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--brand-ink, #143b2e);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.oauthBtnSecondary:hover {
+  background: #f5f8f5;
+  border-color: #8aa493;
+}
+
+.oauthBtnChatGPT {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 1px solid #a9bfb1;
+  border-radius: 6px;
+  background: #f6faf7;
+  color: var(--brand-ink, #143b2e);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.oauthBtnChatGPT:hover {
+  background: #ebf3ed;
+  border-color: #4e765e;
+}
+
+.oauthIcon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 960px) {
+  .authLayout {
+    display: block;
+  }
+
+  .backdrop {
+    display: none;
+  }
+
+  .authContent {
+    width: min(100% - 40px, 552px);
+    margin: 36px auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .oauthRow {
+    grid-template-columns: 1fr;
+  }
+}
