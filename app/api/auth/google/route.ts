@@ -18,4 +18,3 @@ export function POST(request: Request) {
   const isDev = typeof process !== 'undefined' && process.env?.NODE_ENV === 'development';
   return handleGoogleRequest(request, getGoogleEnv(), { development: isDev });
 }
-

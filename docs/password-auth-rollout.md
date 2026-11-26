@@ -12,7 +12,9 @@ With `HARNESS_MAIL_MODE=resend-test`, run `npm run dev`, open `/signup`, and reg
 
 ## D1 migration
 
-The password-account schema is introduced by `0003_password_accounts.sql`; policy acceptance version columns are added by `0004_account_policy_versions.sql`. Apply both migrations to the intended D1 database after checking its migration history and backing up production data. The Sites deployment must also include them in its normal migration process. Do not reapply already applied migrations.
+The password-account schema is introduced by `0006_password_accounts.sql`; policy acceptance version columns are added by `0007_account_policy_versions.sql`. Apply both migrations to the intended D1 database after checking its migration history and backing up production data. The Sites deployment must also include them in its normal migration process. Do not reapply already applied migrations.
+
+These entries follow the deployed intake migration `0005_fresh_wild_pack`. Keep applied journal entries, SQL, and snapshots unchanged; new entries must use timestamps after the latest applied migration so upgrades run them as well as fresh installations.
 
 ## Resend testing and delivery
 

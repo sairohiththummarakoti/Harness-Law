@@ -128,10 +128,13 @@ export default function AuthForm({mode}:{mode:"signup"|"signin"|"forgot"|"reset"
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: emailToUse, ...(captchaToken ? { turnstileToken: captchaToken } : {}) })
+        body: JSON.stringify({ email: emailToUse, ...(typedPassword ? { password: typedPassword } : {}), ...(captchaToken ? { turnstileToken: captchaToken } : {}) })
       });
-      const data = await response.json() as { message?: string; error?: string; testOnlyLink?: string };
-      if(!response.ok) throw new Error(data.error || "Unable to resend verification email.");
+      const data = await response.json() as { code?: string; message?: string; error?: string; testOnlyLink?: string };
+      if(!response.ok) {
+        setErrorCode(data.code || "");
+        throw new Error(data.code === "reauthentication_required" ? "Enter your email and password on the sign-in page, then choose Resend verification email." : data.error || "Unable to resend verification email.");
+      }
       setMessage(data.message || "Verification code and link resent. Please check your inbox.");
       setTestOnlyLink(data.testOnlyLink || "");
     } catch(e) {
@@ -249,6 +252,7 @@ export default function AuthForm({mode}:{mode:"signup"|"signin"|"forgot"|"reset"
     {error && (
       <div role="alert" className={styles.formError}>
         <p style={{margin:0}}>{error}</p>
+        {errorCode === "reauthentication_required" && mode !== "signin" && <a className={styles.formLink} href="/signin">Go to sign in</a>}
         {(errorCode === "email_unverified" || error.toLowerCase().includes("verify your email")) && (
           <div style={{marginTop: 8}}>
             <button
@@ -298,17 +302,7 @@ export default function AuthForm({mode}:{mode:"signup"|"signin"|"forgot"|"reset"
     {mode==="verify" && (
       <div className={styles.resendBox}>
         <p style={{fontSize: 13, color: '#52665a', margin: '4px 0'}}>Didn't receive an email or code expired?</p>
-        <button
-          className={styles.textButton}
-          type="button"
-          disabled={busy}
-          onClick={async()=>{
-            const email = prompt("Enter your account email to resend verification code:");
-            if(email) await resendVerification(email);
-          }}
-        >
-          Resend verification code / link
-        </button>
+        <a className={styles.formLink} href="/signin">Sign in to resend verification email</a>
       </div>
     )}
 

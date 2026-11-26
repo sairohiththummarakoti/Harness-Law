@@ -15,8 +15,8 @@ const LIVE_PROJECT_ID = 'harness-ai-39545';
 
 function liveFixture() {
   const sqlite = new DatabaseSync(':memory:');
-  sqlite.exec(readFileSync(new URL('../drizzle/0003_password_accounts.sql', import.meta.url), 'utf8'));
-  sqlite.exec(readFileSync(new URL('../drizzle/0004_account_policy_versions.sql', import.meta.url), 'utf8'));
+  sqlite.exec(readFileSync(new URL('../drizzle/0006_password_accounts.sql', import.meta.url), 'utf8'));
+  sqlite.exec(readFileSync(new URL('../drizzle/0007_account_policy_versions.sql', import.meta.url), 'utf8'));
   sqlite.exec(readFileSync(new URL('../drizzle/0000_same_leopardon.sql', import.meta.url), 'utf8'));
   sqlite.exec(readFileSync(new URL('../drizzle/0001_integration_cases.sql', import.meta.url), 'utf8'));
   sqlite.exec(readFileSync(new URL('../drizzle/0002_google_signin.sql', import.meta.url), 'utf8'));

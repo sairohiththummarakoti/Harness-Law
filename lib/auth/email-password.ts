@@ -121,6 +121,23 @@ function canRegister(env: PasswordAuthEnv) {
   return !!(env.HARNESS_TERMS_VERSION && env.HARNESS_PRIVACY_VERSION && mailReady && env.HARNESS_TURNSTILE_SITE_KEY && env.HARNESS_TURNSTILE_SECRET_KEY);
 }
 
+type PasswordAccount = { user_id: string; email: string; name: string; password_hash: string; verified_at: number | null };
+const isFirebaseAccount = (account: Pick<PasswordAccount, 'password_hash'>) => account.password_hash.startsWith('firebase:') || account.password_hash === 'oauth_account';
+const firebaseAccountHash = (localId: string) => `firebase:${localId}`;
+
+async function authenticateFirebase(config: FirebaseAuthConfig, email: string, password: string, requireVerified = true) {
+  const signedIn = await firebaseSignIn(config, email, password);
+  const lookup = await firebaseLookupUser(config, signedIn.idToken);
+  const user = lookup.users?.find(candidate => candidate.localId === signedIn.localId);
+  if (!user || user.disabled || !user.email || user.email.trim().toLowerCase() !== email || signedIn.email.trim().toLowerCase() !== email) {
+    throw new FirebaseAuthError('login_failed', 'Email or password is incorrect.', 401);
+  }
+  if (requireVerified && user.emailVerified !== true) {
+    throw new FirebaseAuthError('email_unverified', 'Verify your email before logging in.', 403);
+  }
+  return { ...signedIn, user };
+}
+
 const testLinkEnabled = (env: PasswordAuthEnv) => env.HARNESS_MAIL_MODE === 'local' && process.env.NODE_ENV === 'development';
 
 export async function readPasswordUser(db: DB, cookieHeader: string, secure = true) {
@@ -233,21 +250,14 @@ export async function handlePasswordAuth(request: Request, env: PasswordAuthEnv,
         const fbUser = await firebaseSignUp(fbConfig, email, password);
         await firebaseSendEmailVerification(fbConfig, fbUser.idToken);
         const userId = `password:${fbUser.localId}`;
-        const hash = await passwordDigest(password);
+        const hash = firebaseAccountHash(fbUser.localId);
         try {
           await env.DB.prepare('INSERT INTO password_accounts (user_id,name,email,password_hash,verified_at,terms_accepted_at,terms_version,privacy_version,created_at) VALUES (?,?,?,?,NULL,?,?,?,?)')
             .bind(userId, name, email, hash, now, termsVersion, privacyVersion, now).run();
         } catch {
           return jsonError('email_exists', 'This email is already registered. Try logging in or resetting your password.', 409);
         }
-        const token = randomToken(), otp = randomOtp();
-        const tokenDigest = await tokenHash(token), otpDigest = await tokenHash(`otp:${otp}`);
-        await env.DB.batch([
-          env.DB.prepare('INSERT INTO email_challenges (token_hash,user_id,purpose,expires_at,created_at) VALUES (?,?,?,?,?)').bind(tokenDigest, userId, 'verify', now + VERIFY_TTL, now),
-          env.DB.prepare('INSERT INTO email_challenges (token_hash,user_id,purpose,expires_at,created_at) VALUES (?,?,?,?,?)').bind(otpDigest, userId, 'verify', now + VERIFY_TTL, now)
-        ]);
-        const verificationUrl = new URL(`/api/auth/email/verify?token=${token}`, request.url).toString();
-        return authJson({ ok: true, message: 'Check your email for a verification code or link from Firebase.', ...(testLinkEnabled(env) ? { testOnlyLink: verificationUrl, testOnlyOtp: otp } : {}) }, 202);
+        return authJson({ ok: true, message: 'Check your email for a verification link from Firebase.' }, 202);
       } catch (err) {
         if (err instanceof FirebaseAuthError) return jsonError(err.code, err.message, err.status);
         return jsonError('registration_failed', 'Registration failed. Please try again.', 500);
@@ -280,32 +290,32 @@ export async function handlePasswordAuth(request: Request, env: PasswordAuthEnv,
   if (action === 'verify') {
     const input = typeof data.token === 'string' ? data.token.trim() : (typeof data.code === 'string' ? data.code.trim() : '');
     if (!input) return jsonError('invalid_token', 'Verification code or link is invalid or expired.', 400);
-
-    if (fbConfig) {
-      try {
-        const verified = await firebaseVerifyEmail(fbConfig, input);
-        await env.DB.prepare('UPDATE password_accounts SET verified_at=? WHERE email=? OR user_id=?')
-          .bind(now, verified.email.toLowerCase(), `password:${verified.localId}`).run();
-        return authJson({ ok: true, message: 'Email verified. You can now log in.', redirectTo: '/signin?verified=1' });
-      } catch (err) {
-        // If Firebase verification throws, also check local challenges in case of hybrid flow
-        if (!(err instanceof FirebaseAuthError)) throw err;
-      }
-    }
-
     const candidateHashes = [await tokenHash(input)];
     if (/^\d{6}$/.test(input)) candidateHashes.push(await tokenHash(`otp:${input}`));
     let row: { user_id: string } | null = null;
     for (const digest of candidateHashes) {
-      row = await env.DB.prepare("SELECT user_id FROM email_challenges WHERE token_hash=? AND purpose='verify' AND expires_at>?").bind(digest, now).first<{ user_id: string }>();
+      row = await env.DB.prepare("SELECT c.user_id FROM email_challenges c JOIN password_accounts a ON a.user_id=c.user_id WHERE c.token_hash=? AND c.purpose='verify' AND c.expires_at>? AND a.password_hash LIKE 'pbkdf2-sha256$%'").bind(digest, now).first<{ user_id: string }>();
       if (row) break;
     }
-    if (!row) return jsonError('invalid_token', 'Verification code or link is invalid or expired.', 400);
-    await env.DB.batch([
-      env.DB.prepare('UPDATE password_accounts SET verified_at=? WHERE user_id=?').bind(now, row.user_id),
-      env.DB.prepare("DELETE FROM email_challenges WHERE user_id=? AND purpose='verify'").bind(row.user_id)
-    ]);
-    return authJson({ ok: true, message: 'Email verified. You can now log in.', redirectTo: '/signin?verified=1' });
+    if (row) {
+      await env.DB.batch([
+        env.DB.prepare('UPDATE password_accounts SET verified_at=? WHERE user_id=?').bind(now, row.user_id),
+        env.DB.prepare("DELETE FROM email_challenges WHERE user_id=? AND purpose='verify'").bind(row.user_id)
+      ]);
+      return authJson({ ok: true, message: 'Email verified. You can now log in.', redirectTo: '/signin?verified=1' });
+    }
+    if (fbConfig) {
+      try {
+        const verified = await firebaseVerifyEmail(fbConfig, input);
+        await env.DB.prepare("UPDATE password_accounts SET verified_at=? WHERE user_id=? AND email=? AND (password_hash LIKE 'firebase:%' OR password_hash='oauth_account')")
+          .bind(now, `password:${verified.localId}`, verified.email.toLowerCase()).run();
+        return authJson({ ok: true, message: 'Email verified. You can now log in.', redirectTo: '/signin?verified=1' });
+      } catch (err) {
+        if (err instanceof FirebaseAuthError) return jsonError(err.code, err.message, err.status);
+        return jsonError('auth_unavailable', 'Verification is temporarily unavailable. Please try again.', 503);
+      }
+    }
+    return jsonError('invalid_token', 'Verification code or link is invalid or expired.', 400);
   }
 
   if (action === 'email-change') {
@@ -316,7 +326,7 @@ export async function handlePasswordAuth(request: Request, env: PasswordAuthEnv,
     if (/^\d{6}$/.test(input)) candidateHashes.push(await tokenHash(`otp:${input}`));
     let row: { user_id: string; pending_email: string } | null = null;
     for (const digest of candidateHashes) {
-      row = await env.DB.prepare("SELECT c.user_id,a.pending_email FROM email_challenges c JOIN password_accounts a ON a.user_id=c.user_id WHERE c.token_hash=? AND c.purpose='email-change' AND c.expires_at>? AND a.pending_email IS NOT NULL").bind(digest, now).first<{ user_id: string; pending_email: string }>();
+      row = await env.DB.prepare("SELECT c.user_id,a.pending_email FROM email_challenges c JOIN password_accounts a ON a.user_id=c.user_id WHERE c.token_hash=? AND c.purpose='email-change' AND c.expires_at>? AND a.pending_email IS NOT NULL AND a.password_hash LIKE 'pbkdf2-sha256$%'").bind(digest, now).first<{ user_id: string; pending_email: string }>();
       if (row) break;
     }
     if (!row) return jsonError('invalid_token', 'Email confirmation link is invalid or expired.', 400);
@@ -341,41 +351,41 @@ export async function handlePasswordAuth(request: Request, env: PasswordAuthEnv,
     const rememberMe = data.rememberMe === true || data.rememberMe === 'on' || data.rememberMe === 'true';
     const sessionTtl = rememberMe ? 30 * 86400 : SESSION_TTL;
 
-    if (fbConfig) {
-      try {
-        const signinRes = await firebaseSignIn(fbConfig, email, password);
-        const lookup = await firebaseLookupUser(fbConfig, signinRes.idToken);
-        const fbUser = lookup.users[0];
-        let localAccount = await env.DB.prepare('SELECT user_id, email, name, verified_at FROM password_accounts WHERE email=?').bind(email).first<{ user_id: string; email: string; name: string; verified_at: number | null }>();
-        const isVerified = Boolean((fbUser && fbUser.emailVerified) || localAccount?.verified_at);
-        if (!isVerified) {
-          return jsonError('email_unverified', 'Verify your email before logging in.', 403);
+    const account = await env.DB.prepare('SELECT user_id,email,name,password_hash,verified_at FROM password_accounts WHERE email=?').bind(email).first<PasswordAccount>();
+    // Native password accounts keep their own credentials. A matching email is
+    // never permission to replace them with an unrelated Firebase identity.
+    if (!account || isFirebaseAccount(account)) {
+      if (!fbConfig) {
+        if (account) return jsonError('auth_unavailable', 'Account sign-in is temporarily unavailable.', 503);
+      } else {
+        try {
+          const firebase = await authenticateFirebase(fbConfig, email, password);
+          const userId = `password:${firebase.localId}`;
+          if (account && account.user_id !== userId) {
+            return jsonError('account_conflict', 'This sign-in does not match the saved account. Use its original sign-in method.', 409);
+          }
+          if (!account) {
+            const byId = await env.DB.prepare('SELECT user_id FROM password_accounts WHERE user_id=?').bind(userId).first<{ user_id: string }>();
+            if (byId) return jsonError('account_conflict', 'This sign-in does not match the saved account email.', 409);
+            await env.DB.prepare('INSERT INTO password_accounts (user_id,name,email,password_hash,verified_at,terms_accepted_at,terms_version,privacy_version,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+              .bind(userId, firebase.user.displayName || email.split('@')[0], email, firebaseAccountHash(firebase.localId), now, now, env.HARNESS_TERMS_VERSION || 'local-draft', env.HARNESS_PRIVACY_VERSION || 'local-draft', now).run();
+          } else {
+            await env.DB.prepare('UPDATE password_accounts SET verified_at=?,password_hash=? WHERE user_id=?').bind(now, firebaseAccountHash(firebase.localId), userId).run();
+          }
+          const token = randomToken(), expires = now + sessionTtl;
+          await env.DB.prepare('INSERT INTO password_sessions (token_hash,user_id,expires_at) VALUES (?,?,?)').bind(await tokenHash(token), userId, expires).run();
+          const headers = new Headers();
+          headers.append('Set-Cookie', authCookie(sessionCookie(secure), token, sessionTtl, secure));
+          headers.append('Set-Cookie', authCookie(cookieNames(secure).provider, 'password', rememberMe ? 30 * 86400 : 400 * 24 * 60 * 60, secure));
+          return authJson({ ok: true, redirectTo: '/onboarding' }, 200, headers);
+        } catch (err) {
+          if (err instanceof FirebaseAuthError) return jsonError(err.code, err.message, err.status);
+          return jsonError('login_failed', 'Email or password is incorrect.', 401);
         }
-
-        const userId = `password:${fbUser.localId}`;
-        if (!localAccount) {
-          const mirrorHash = await passwordDigest(password);
-          await env.DB.prepare('INSERT INTO password_accounts (user_id,name,email,password_hash,verified_at,terms_accepted_at,terms_version,privacy_version,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
-            .bind(userId, fbUser.displayName || email.split('@')[0], email, mirrorHash, now, now, env.HARNESS_TERMS_VERSION || 'local-draft', env.HARNESS_PRIVACY_VERSION || 'local-draft', now).run();
-          localAccount = { user_id: userId, email, name: fbUser.displayName || email.split('@')[0], verified_at: now };
-        } else {
-          await env.DB.prepare('UPDATE password_accounts SET verified_at=? WHERE user_id=?').bind(now, localAccount.user_id).run();
-        }
-
-        const token = randomToken(), expires = now + sessionTtl;
-        await env.DB.prepare('INSERT INTO password_sessions (token_hash,user_id,expires_at) VALUES (?,?,?)').bind(await tokenHash(token), localAccount.user_id, expires).run();
-        const headers = new Headers();
-        headers.append('Set-Cookie', authCookie(sessionCookie(secure), token, sessionTtl, secure));
-        headers.append('Set-Cookie', authCookie(cookieNames(secure).provider, 'password', rememberMe ? 30 * 86400 : 400 * 24 * 60 * 60, secure));
-        return authJson({ ok: true, redirectTo: '/onboarding' }, 200, headers);
-      } catch (err) {
-        if (err instanceof FirebaseAuthError) return jsonError(err.code, err.message, err.status);
-        return jsonError('login_failed', 'Email or password is incorrect.', 401);
       }
     }
 
-    // Local authentication fallback
-    const account = await env.DB.prepare('SELECT user_id,email,name,password_hash,verified_at FROM password_accounts WHERE email=?').bind(email).first<{ user_id: string; email: string; name: string; password_hash: string; verified_at: number | null }>();
+    // Native authentication remains available when Firebase is configured.
     const valid = await verifyPassword(password, account?.password_hash || DUMMY_PASSWORD_HASH);
     if (!account || !valid) return jsonError('login_failed', 'Email or password is incorrect.', 401);
     if (!account.verified_at) return jsonError('email_unverified', 'Verify your email before logging in.', 403);
@@ -388,25 +398,31 @@ export async function handlePasswordAuth(request: Request, env: PasswordAuthEnv,
   }
 
   if (action === 'resend' || action === 'forgot') {
-    const account = await env.DB.prepare('SELECT user_id,email,verified_at FROM password_accounts WHERE email=?').bind(email).first<{ user_id: string; email: string; verified_at: number | null }>();
-    if (fbConfig) {
+    const account = await env.DB.prepare('SELECT user_id,email,password_hash,verified_at FROM password_accounts WHERE email=?').bind(email).first<PasswordAccount>();
+    if (!await rateLimit(env.DB, `email:${await tokenHash(email)}:${action}`, isDev ? 100 : 3, 3600, now)) {
+      return jsonError('rate_limited', 'Too many requests. Please wait and try again.', 429);
+    }
+    if ((!account || isFirebaseAccount(account)) && fbConfig) {
       if (action === 'forgot') {
         try { await firebaseSendPasswordReset(fbConfig, email); } catch {}
         return authJson({ ok: true, message: GENERIC }, 202);
       }
-      if (action === 'resend') {
-        // If already verified, do not resend
-        if (account?.verified_at) return authJson({ ok: true, message: GENERIC }, 202);
-        try { await firebaseSendPasswordReset(fbConfig, email); } catch {}
+      const password = typeof data.password === 'string' ? data.password : '';
+      if (!password) return jsonError('reauthentication_required', 'Enter your password to resend your verification email.', 422);
+      try {
+        const firebase = await authenticateFirebase(fbConfig, email, password, false);
+        if (account && account.user_id !== `password:${firebase.localId}`) return jsonError('account_conflict', 'This sign-in does not match the saved account.', 409);
+        if (!firebase.user.emailVerified) await firebaseSendEmailVerification(fbConfig, firebase.idToken);
         return authJson({ ok: true, message: GENERIC }, 202);
+      } catch (err) {
+        if (err instanceof FirebaseAuthError) return jsonError(err.code, err.message, err.status);
+        return jsonError('email_delivery_unavailable', 'Verification email could not be sent. Please try again.', 503);
       }
     }
+    if (account && isFirebaseAccount(account)) return jsonError('auth_unavailable', 'Account sign-in is temporarily unavailable.', 503);
 
     let testOnlyLink: string | undefined, testOnlyOtp: string | undefined;
     if (account && !(action === 'resend' && account.verified_at)) {
-      if (!await rateLimit(env.DB, `email:${await tokenHash(email)}:${action}`, isDev ? 100 : 3, 3600, now)) {
-        return jsonError('rate_limited', 'Too many requests. Please wait and try again.', 429);
-      }
       const purpose = action === 'resend' ? 'verify' : 'reset';
       const token = randomToken(), otp = randomOtp();
       const tokenDigest = await tokenHash(token), otpDigest = await tokenHash(`otp:${otp}`);
@@ -437,30 +453,32 @@ export async function handlePasswordAuth(request: Request, env: PasswordAuthEnv,
     if (password.length < 8 || password.length > 1024) return jsonError('invalid_password', 'Use a password of at least 8 characters.', 422);
     if (!input) return jsonError('invalid_token', 'Reset code or link is invalid or expired.', 400);
 
-    if (fbConfig) {
-      try {
-        const resetRes = await firebaseConfirmPasswordReset(fbConfig, input, password);
-        const account = await env.DB.prepare('SELECT user_id, email FROM password_accounts WHERE email=?').bind(resetRes.email.toLowerCase()).first<{ user_id: string; email: string }>();
-        if (account) {
-          await env.DB.batch([
-            env.DB.prepare('UPDATE password_accounts SET password_hash=? WHERE user_id=?').bind(await passwordDigest(password), account.user_id),
-            env.DB.prepare('DELETE FROM password_sessions WHERE user_id=?').bind(account.user_id)
-          ]);
-        }
-        return authJson({ ok: true, message: 'Password updated. Log in with your new password.', redirectTo: '/signin?passwordReset=1' });
-      } catch (err) {
-        if (!(err instanceof FirebaseAuthError)) throw err;
-      }
-    }
-
     const candidateHashes = [await tokenHash(input)];
     if (/^\d{6}$/.test(input)) candidateHashes.push(await tokenHash(`otp:${input}`));
     let row: { user_id: string } | null = null;
     for (const digest of candidateHashes) {
-      row = await env.DB.prepare("SELECT user_id FROM email_challenges WHERE token_hash=? AND purpose='reset' AND expires_at>?").bind(digest, now).first<{ user_id: string }>();
+      row = await env.DB.prepare("SELECT c.user_id FROM email_challenges c JOIN password_accounts a ON a.user_id=c.user_id WHERE c.token_hash=? AND c.purpose='reset' AND c.expires_at>? AND a.password_hash LIKE 'pbkdf2-sha256$%'").bind(digest, now).first<{ user_id: string }>();
       if (row) break;
     }
-    if (!row) return jsonError('invalid_token', 'Reset link is invalid or expired.', 400);
+    if (!row) {
+      if (fbConfig) {
+        try {
+          const resetRes = await firebaseConfirmPasswordReset(fbConfig, input, password);
+          const account = await env.DB.prepare('SELECT user_id,email,password_hash FROM password_accounts WHERE email=?').bind(resetRes.email.toLowerCase()).first<PasswordAccount>();
+          if (account && isFirebaseAccount(account)) {
+            const firebase = await firebaseSignIn(fbConfig, resetRes.email.toLowerCase(), password);
+            if (account.user_id !== `password:${firebase.localId}` || firebase.email.toLowerCase() !== resetRes.email.toLowerCase()) return jsonError('account_conflict', 'This reset does not match the saved account.', 409);
+            await env.DB.prepare('DELETE FROM password_sessions WHERE user_id=?').bind(account.user_id).run();
+          }
+          return authJson({ ok: true, message: 'Password updated. Log in with your new password.', redirectTo: '/signin?passwordReset=1' });
+        } catch (err) {
+          if (err instanceof FirebaseAuthError) return jsonError(err.code, err.message, err.status);
+          return jsonError('auth_unavailable', 'Password reset is temporarily unavailable. Please try again.', 503);
+        }
+      }
+  
+        return jsonError('invalid_token', 'Reset link is invalid or expired.', 400);
+    }
     await env.DB.batch([
       env.DB.prepare('UPDATE password_accounts SET password_hash=? WHERE user_id=?').bind(await passwordDigest(password), row.user_id),
       env.DB.prepare("DELETE FROM email_challenges WHERE user_id=? AND purpose='reset'").bind(row.user_id),
@@ -477,8 +495,9 @@ export async function handlePasswordAuth(request: Request, env: PasswordAuthEnv,
     if (!actorId?.startsWith('password:')) return jsonError('authentication_required', 'Log in with your email account to change its address.', 401);
     const next = typeof data.email === 'string' ? data.email.trim().toLowerCase() : '';
     if (!EMAIL.test(next)) return jsonError('invalid_email', 'Enter a valid new email address.', 422);
-    const account = await env.DB.prepare('SELECT email FROM password_accounts WHERE user_id=?').bind(actorId).first<{ email: string }>();
+    const account = await env.DB.prepare('SELECT email,password_hash FROM password_accounts WHERE user_id=?').bind(actorId).first<{ email: string; password_hash: string }>();
     if (!account) return jsonError('account_unavailable', 'Account is unavailable.', 404);
+    if (isFirebaseAccount(account)) return jsonError('provider_managed_email', 'Email changes for this sign-in method must be handled through your authentication provider. Your current email remains unchanged.', 409);
     if (next === account.email) return jsonError('same_email', 'Enter a different email address.', 422);
     try {
       await env.DB.prepare('UPDATE password_accounts SET pending_email=? WHERE user_id=?').bind(next, actorId).run();
@@ -509,9 +528,11 @@ export async function handlePasswordAuth(request: Request, env: PasswordAuthEnv,
     const account = await env.DB.prepare('SELECT email,password_hash FROM password_accounts WHERE user_id=? AND verified_at IS NOT NULL').bind(actorId).first<{ email: string; password_hash: string }>();
     if (!account) return jsonError('account_unavailable', 'Account not found.', 404);
 
-    if (fbConfig) {
+    if (isFirebaseAccount(account)) {
+      if (!fbConfig) return jsonError('auth_unavailable', 'Account sign-in is temporarily unavailable.', 503);
       try {
-        const signinRes = await firebaseSignIn(fbConfig, account.email, current);
+        const signinRes = await authenticateFirebase(fbConfig, account.email, current);
+        if (`password:${signinRes.localId}` !== actorId) return jsonError('account_conflict', 'This sign-in does not match the saved account.', 409);
         await firebaseUpdatePassword(fbConfig, signinRes.idToken, next);
       } catch (err) {
         if (err instanceof FirebaseAuthError) return jsonError('reauthentication_required', 'Your current password is incorrect.', 403);
@@ -522,7 +543,7 @@ export async function handlePasswordAuth(request: Request, env: PasswordAuthEnv,
     }
 
     await env.DB.batch([
-      env.DB.prepare('UPDATE password_accounts SET password_hash=? WHERE user_id=?').bind(await passwordDigest(next), actorId),
+      env.DB.prepare('UPDATE password_accounts SET password_hash=? WHERE user_id=?').bind(isFirebaseAccount(account) ? firebaseAccountHash(actorId.slice('password:'.length)) : await passwordDigest(next), actorId),
       env.DB.prepare('DELETE FROM password_sessions WHERE user_id=?').bind(actorId)
     ]);
     try {
@@ -537,9 +558,11 @@ export async function handlePasswordAuth(request: Request, env: PasswordAuthEnv,
     const account = await env.DB.prepare('SELECT email, password_hash FROM password_accounts WHERE user_id=?').bind(actorId).first<{ email: string; password_hash: string }>();
     if (!account) return jsonError('account_unavailable', 'Account not found.', 404);
 
-    if (fbConfig) {
+    if (isFirebaseAccount(account)) {
+      if (!fbConfig) return jsonError('auth_unavailable', 'Account sign-in is temporarily unavailable.', 503);
       try {
-        const signinRes = await firebaseSignIn(fbConfig, account.email, password);
+        const signinRes = await authenticateFirebase(fbConfig, account.email, password);
+        if (`password:${signinRes.localId}` !== actorId) return jsonError('account_conflict', 'This sign-in does not match the saved account.', 409);
         await firebaseDeleteUser(fbConfig, signinRes.idToken);
       } catch (err) {
         if (err instanceof FirebaseAuthError) return jsonError('reauthentication_required', 'Enter your current password to confirm account deletion.', 403);

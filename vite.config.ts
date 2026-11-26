@@ -85,6 +85,8 @@ export default defineConfig(async ({ command }) => {
         inspectorPort: false,
         config: {
           ...localBindingConfig,
+          // Hosted runtime values come from Sites; never package local credentials.
+          ...(command === "build" ? { vars: {} } : {}),
           ...(command === "serve"
             ? {
                 services: [

@@ -10,8 +10,8 @@ import { tokenHash } from '../lib/auth/runtime.ts';
 const origin='https://harnesslaw.test';
 function fixture(){
   const sqlite=new DatabaseSync(':memory:');
-  sqlite.exec(readFileSync(new URL('../drizzle/0003_password_accounts.sql',import.meta.url),'utf8'));
-  sqlite.exec(readFileSync(new URL('../drizzle/0004_account_policy_versions.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../drizzle/0006_password_accounts.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../drizzle/0007_account_policy_versions.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../drizzle/0000_same_leopardon.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../drizzle/0001_integration_cases.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../drizzle/0002_google_signin.sql',import.meta.url),'utf8'));
@@ -249,6 +249,9 @@ test('change-password and delete-account fail closed if Firebase verification en
   const actor = await readPasswordUser(f.db as never, cookie, true);
   assert.ok(actor);
 
+  // This case represents an explicitly Firebase-backed account, not a native one.
+  const remoteHash = `firebase:${actor.userId.slice('password:'.length)}`;
+  f.sqlite.prepare('UPDATE password_accounts SET password_hash=? WHERE user_id=?').run(remoteHash, actor.userId);
   const failingEnv = {
    ...f.env,
    FIREBASE_API_KEY: 'fb_test_api_key',
@@ -279,7 +282,151 @@ test('change-password and delete-account fail closed if Firebase verification en
   );
   assert.equal(delRes.status, 503);
 
-  // Original password must still work
-  assert.equal((await send(f, 'login', { email: 'alex@example.com', password: 'initial-password-123' })).status, 200);
+  // A provider outage cannot change the account or enable local-password fallback.
+  assert.equal(f.sqlite.prepare('SELECT password_hash FROM password_accounts WHERE user_id=?').get(actor.userId)?.password_hash, remoteHash);
+  assert.equal((await send(f, 'login', { email: 'alex@example.com', password: 'initial-password-123' })).status, 503);
  } finally { f.sqlite.close(); }
+});
+
+function firebaseFixture() {
+ const f=fixture();
+ const calls:{endpoint:string;body:Record<string,unknown>}[]=[];
+ const remote={uid:'firebase-user-a',email:'remote@example.test',verified:true};
+ f.env.FIREBASE_API_KEY='stub-only-key';
+ f.env.fetch=async(input:RequestInfo|URL,init?:RequestInit)=>{
+  const url=String(input);
+  if(url.endsWith('/siteverify')) return Response.json({success:true,hostname:'harnesslaw.test'});
+  const endpoint=new URL(url).pathname.split('/').at(-1)!;
+  const body=JSON.parse(String(init?.body||'{}')) as Record<string,unknown>;
+  calls.push({endpoint,body});
+  if(endpoint==='accounts:signInWithPassword') {
+   if(body.password!=='remote-password') return Response.json({error:{message:'INVALID_LOGIN_CREDENTIALS'}},{status:400});
+   return Response.json({localId:remote.uid,email:remote.email,idToken:'stub-id-token',refreshToken:'stub-refresh',registered:true});
+  }
+  if(endpoint==='accounts:lookup') return Response.json({users:[{localId:remote.uid,email:remote.email,emailVerified:remote.verified}]});
+  if(endpoint==='accounts:sendOobCode') return Response.json({email:remote.email});
+  if(endpoint==='accounts:resetPassword') return Response.json({email:remote.email});
+  throw new Error('Unexpected Firebase request: '+endpoint);
+ };
+ function addRemote(uid=remote.uid,verifiedAt:number|null=123) {
+  f.sqlite.prepare('INSERT INTO password_accounts (user_id,name,email,password_hash,verified_at,terms_accepted_at,terms_version,privacy_version,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+   .run('password:'+uid,'Remote User',remote.email,'firebase:'+uid,verifiedAt,1,'terms','privacy',1);
+ }
+ return {...f,calls,remote,addRemote};
+}
+
+test('locally verified account cannot override Firebase email verification or UID binding',async()=>{
+ const f=firebaseFixture();try{
+  f.addRemote();f.remote.verified=false;
+  const unverified=await send(f,'login',{email:f.remote.email,password:'remote-password'});
+  assert.equal(unverified.status,403);assert.equal((await unverified.json() as {code:string}).code,'email_unverified');
+  f.remote.verified=true;f.remote.uid='different-firebase-user';
+  const collision=await send(f,'login',{email:f.remote.email,password:'remote-password'});
+  assert.equal(collision.status,409);
+  assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM password_sessions').get()?.n,0);
+  assert.equal(f.sqlite.prepare('SELECT user_id FROM password_accounts').get()?.user_id,'password:firebase-user-a');
+ }finally{f.sqlite.close();}
+});
+
+test('Firebase cannot take over native credentials sharing its email; native login remains available',async()=>{
+ const f=fixture();try{
+  await send(f,'register',{name:'Native User',email:'remote@example.test',password:'native-password',acceptedTerms:true});
+  await send(f,'verify',{token:linkToken(f.messages[0])});
+  const originalId=f.sqlite.prepare('SELECT user_id FROM password_accounts').get()?.user_id;
+  f.env.FIREBASE_API_KEY='stub-only-key';
+  const attempts:string[]=[];
+  f.env.fetch=async(input:RequestInfo|URL)=>{const url=String(input);if(url.endsWith('/siteverify'))return Response.json({success:true,hostname:'harnesslaw.test'});attempts.push(url);throw new Error('Native credentials must not be sent to Firebase');};
+  assert.equal((await send(f,'login',{email:'remote@example.test',password:'remote-password'})).status,401);
+  assert.equal((await send(f,'login',{email:'remote@example.test',password:'native-password'})).status,200);
+  assert.deepEqual(attempts,[]);
+  assert.equal(f.sqlite.prepare('SELECT user_id FROM password_accounts').get()?.user_id,originalId);
+ }finally{f.sqlite.close();}
+});
+
+test('Firebase account stores provider marker and never falls back to a mirrored local password',async()=>{
+ const f=firebaseFixture();try{
+  assert.equal((await send(f,'login',{email:f.remote.email,password:'remote-password'})).status,200);
+  assert.equal(f.sqlite.prepare('SELECT password_hash FROM password_accounts').get()?.password_hash,'firebase:firebase-user-a');
+  delete f.env.FIREBASE_API_KEY;
+  assert.equal((await send(f,'login',{email:f.remote.email,password:'remote-password'})).status,503);
+ }finally{f.sqlite.close();}
+});
+
+test('Firebase resend authenticates the matching identity and sends VERIFY_EMAIL, never PASSWORD_RESET',async()=>{
+ const f=firebaseFixture();try{
+  f.addRemote(undefined,null);f.remote.verified=false;
+  const missing=await send(f,'resend',{email:f.remote.email});assert.equal(missing.status,422);
+  assert.equal((await missing.json() as {code:string}).code,'reauthentication_required');
+  assert.equal((await send(f,'resend',{email:f.remote.email,password:'wrong-password'})).status,401);
+  assert.equal((await send(f,'resend',{email:f.remote.email,password:'remote-password'})).status,202);
+  const emails=f.calls.filter(call=>call.endpoint==='accounts:sendOobCode');
+  assert.equal(emails.length,1);assert.deepEqual(emails[0].body,{requestType:'VERIFY_EMAIL',idToken:'stub-id-token'});
+ }finally{f.sqlite.close();}
+});
+
+test('native verification resend retains its delivery adapter when Firebase is configured',async()=>{
+ const f=fixture();try{
+  await send(f,'register',{name:'Native User',email:'native@example.test',password:'native-password',acceptedTerms:true});
+  f.env.FIREBASE_API_KEY='stub-only-key';
+  f.env.fetch=async(input:RequestInfo|URL)=>{if(String(input).endsWith('/siteverify'))return Response.json({success:true,hostname:'harnesslaw.test'});throw new Error('Native resend must not call Firebase');};
+  assert.equal((await send(f,'resend',{email:'native@example.test'})).status,202);
+  assert.equal(f.messages.length,2);assert.match(f.messages[1].subject,/Verify/);
+ }finally{f.sqlite.close();}
+});
+
+test('Firebase password reset cannot replace a native password through an email collision',async()=>{
+ const f=fixture();try{
+  await send(f,'register',{name:'Native User',email:'remote@example.test',password:'native-password',acceptedTerms:true});
+  await send(f,'verify',{token:linkToken(f.messages[0])});
+  const originalHash=f.sqlite.prepare('SELECT password_hash FROM password_accounts').get()?.password_hash;
+  f.env.FIREBASE_API_KEY='stub-only-key';
+  f.env.fetch=async(input:RequestInfo|URL)=>{
+   if(String(input).endsWith('/siteverify'))return Response.json({success:true,hostname:'harnesslaw.test'});
+   if(String(input).includes('accounts:resetPassword'))return Response.json({email:'remote@example.test'});
+   throw new Error('Unexpected request');
+  };
+  assert.equal((await send(f,'reset',{token:'firebase-reset-code',password:'remote-password'})).status,200);
+  assert.equal(f.sqlite.prepare('SELECT password_hash FROM password_accounts').get()?.password_hash,originalHash);
+  assert.equal((await send(f,'login',{email:'remote@example.test',password:'native-password'})).status,200);
+ }finally{f.sqlite.close();}
+});
+
+
+test('native verification and reset continue through a Firebase outage without calling its service',async()=>{
+ const f=fixture();try{
+  await send(f,'register',{name:'Native User',email:'native@example.test',password:'native-password',acceptedTerms:true});
+  const verification=linkToken(f.messages[0]);
+  f.env.FIREBASE_API_KEY='stub-only-key';
+  f.env.fetch=async(input:RequestInfo|URL)=>{if(String(input).endsWith('/siteverify'))return Response.json({success:true,hostname:'harnesslaw.test'});throw new Error('Native flow must not call Firebase');};
+  assert.equal((await send(f,'verify',{token:verification})).status,200);
+  assert.equal((await send(f,'forgot',{email:'native@example.test'})).status,202);
+  assert.equal((await send(f,'reset',{token:linkToken(f.messages[1]),password:'new-native-password'})).status,200);
+  assert.equal((await send(f,'login',{email:'native@example.test',password:'new-native-password'})).status,200);
+ }finally{f.sqlite.close();}
+});
+
+test('Firebase password changes and deletion reject a different UID without mutating the account',async()=>{
+ const f=firebaseFixture();try{
+  f.addRemote();f.remote.uid='different-uid';
+  assert.equal((await send(f,'change-password',{currentPassword:'remote-password',password:'new-remote-password'},'password:firebase-user-a')).status,409);
+  assert.equal((await send(f,'delete-account',{password:'remote-password'},'password:firebase-user-a')).status,409);
+  assert.equal(f.sqlite.prepare('SELECT password_hash FROM password_accounts').get()?.password_hash,'firebase:firebase-user-a');
+  assert.equal(f.calls.filter(call=>call.endpoint==='accounts:delete'||call.endpoint==='accounts:update').length,0);
+ }finally{f.sqlite.close();}
+});
+
+
+test('Firebase accounts cannot change only their local email or use a stale local email-change challenge',async()=>{
+ const f=firebaseFixture();try{
+  f.addRemote();
+  const changed=await send(f,'change-email',{email:'new@example.test'},'password:firebase-user-a');
+  assert.equal(changed.status,409);assert.equal((await changed.json() as {code:string}).code,'provider_managed_email');
+  assert.equal(f.sqlite.prepare('SELECT pending_email FROM password_accounts').get()?.pending_email,null);
+  assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM email_challenges').get()?.n,0);
+  const staleToken='stale-local-email-change';const now=Math.floor(Date.now()/1000);
+  f.sqlite.prepare('UPDATE password_accounts SET pending_email=?').run('new@example.test');
+  f.sqlite.prepare('INSERT INTO email_challenges (token_hash,user_id,purpose,expires_at,created_at) VALUES (?,?,?,?,?)').run(await tokenHash(staleToken),'password:firebase-user-a','email-change',now+600,now);
+  assert.equal((await send(f,'email-change',{token:staleToken})).status,400);
+  assert.equal(f.sqlite.prepare('SELECT email FROM password_accounts').get()?.email,f.remote.email);
+ }finally{f.sqlite.close();}
 });
