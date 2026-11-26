@@ -34,11 +34,11 @@ interface EB1AGuideProps {
   selectedCriteria: string[];
   onToggle: (id: string) => void;
   onOpen: (id: string) => void;
-  onAddContext: () => void;
+  onOpenEvidence: () => void;
   updates?: ReactNode;
 }
 
-export function EB1AGuide({ selectedCriteria, onToggle, onOpen, onAddContext, updates }: EB1AGuideProps) {
+export function EB1AGuide({ selectedCriteria, onToggle, onOpen, onOpenEvidence, updates }: EB1AGuideProps) {
   return <div className={styles.guide}>
     <header className={styles.heading}>
       <div>
@@ -96,8 +96,8 @@ export function EB1AGuide({ selectedCriteria, onToggle, onOpen, onAddContext, up
       <summary><span>Have a major award or a different kind of evidence?</span><Plus size={18} className={styles.expandIcon} aria-hidden="true" /></summary>
       <div className={styles.reviewBody}>
         <p>A major, internationally recognized award is a separate initial-evidence route. Comparable evidence may be considered when the listed criteria do not readily apply to your occupation; explain why and how your evidence is comparable.</p>
-        <p>You can record this context in your professional background. This workspace does not validate those alternative routes.</p>
-        <button className={styles.contextButton} type="button" onClick={onAddContext}>Add context to my profile</button>
+        <p>Add and organize these documents in your Evidence library. This workspace does not validate those alternative routes.</p>
+        <button className={styles.contextButton} type="button" onClick={onOpenEvidence}>Open Evidence library</button>
       </div>
     </details>
   </div>;
