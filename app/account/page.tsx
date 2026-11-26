@@ -51,7 +51,7 @@ export default async function AccountPage() {
             <strong style={{ display: 'block', fontSize: 15, color: '#182f28' }}>Sign out</strong>
             <span style={{ fontSize: 13, color: '#55675c' }}>End your session on this device.</span>
           </div>
-          <form action="/api/auth/logout" method="post">
+          <form action="/api/auth/logout" method="post" target="_top">
             <button className={styles.btnSignOut}>Sign out</button>
           </form>
         </div>
