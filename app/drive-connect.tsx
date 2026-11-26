@@ -9,7 +9,8 @@ import styles from "./drive-connect.module.css";
 
 type Provider = "google_drive" | "onedrive";
 type Scope = "folder" | "whole_drive";
-type Connection = { id: string; provider: Provider; displayName: string; scope: Scope; rootId: string; rootName: string; accountLabel: string; status: "pending" | "connected" | "reconnect_required" };
+type Connection = { id: string; provider: Provider; displayName: string; scope: Scope; rootId: string; rootName: string; accountLabel: string; status: "pending" | "connected" | "reconnect_required"; caseId: string | null; evidenceFolderId: string | null };
+export type ConnectedEvidenceLocation = { id: string; caseId: string; evidenceFolderId: string };
 type CloudItem = { id: string; name: string; isFolder: boolean; size: number; mimeType: string };
 type BrowseResult = { folderId: string; items: CloudItem[]; nextCursor: string | null; root: { id: string; name: string } };
 type Config = { providers: { id: Provider; ready: boolean; reason: string | null; notice?: string | null }[] };
@@ -27,6 +28,7 @@ export interface DriveConnectProps {
   onCaseMutation: (operation: (base: CaseState) => Promise<CaseResult>) => Promise<void>;
   onDeviceUpload: (name: string, files: File[], directory: boolean) => Promise<void>;
   beforeConnect: () => Promise<void>;
+  onConnectedLocationsChange?: (locations: ConnectedEvidenceLocation[]) => void;
 }
 
 function ProviderIcon({ provider }: { provider: Provider | "icloud" | "computer" }) {
@@ -40,9 +42,12 @@ const bytes = (size: number) => !size ? "—" : size < 1024 * 1024 ? `${Math.max
 const messageOf = (error: unknown) => error instanceof Error ? error.message : "Something went wrong. Please try again.";
 const directoryAttributes = { webkitdirectory: "", directory: "" } as InputHTMLAttributes<HTMLInputElement>;
 
-export default function DriveConnect({ userId, returnTo, disabled = false, openConnectionId, onCloseConnection, onNotify, onCaseMutation, onDeviceUpload, beforeConnect }: DriveConnectProps) {
+export default function DriveConnect({ userId, returnTo, disabled = false, openConnectionId, onCloseConnection, onNotify, onCaseMutation, onDeviceUpload, beforeConnect, onConnectedLocationsChange }: DriveConnectProps) {
   const [config, setConfig] = useState<Config | null>(null);
   const [connections, setConnections] = useState<Connection[]>([]);
+  useEffect(() => {
+    onConnectedLocationsChange?.(connections.flatMap(connection => connection.status === "connected" && connection.caseId && connection.evidenceFolderId ? [{ id: connection.id, caseId: connection.caseId, evidenceFolderId: connection.evidenceFolderId }] : []));
+  }, [connections, onConnectedLocationsChange]);
   const [loaded, setLoaded] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
   const [busy, setBusy] = useState(false);
