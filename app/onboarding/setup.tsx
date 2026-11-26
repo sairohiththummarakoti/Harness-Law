@@ -13,6 +13,7 @@ import styles from "./setup.module.css";
 import { BrandLogo, BrandMark } from "@/components/brand-logo";
 import { EvidenceLibraryProvider } from "@/components/evidence-library-context";
 import { EvidenceRequestError, uploadEvidenceFile, readEvidenceFile } from "@/lib/evidence-client";
+import { accountGreeting } from "@/lib/account-greeting";
 
 type Choice = { value: string; label: string; description?: string };
 const blankAnswers: IntakeAnswers = { fullName: "", phone: "", helpFor: "", visaType: "", birthCountry: "", birthCountryOther: "", citizenships: [], field: "", role: "", criteria: [], criteriaUnsure: false, majorAward: "", notes: "" };
@@ -80,7 +81,9 @@ function summaryRows(answers: IntakeAnswers): { step: IntakeStep; label: string;
   return rows;
 }
 
-export default function Onboarding({ initialName, initialEmail, signInPath, accountId, editMode = false }: { initialName: string; initialEmail: string; signInPath: string; accountId: string; editMode?: boolean }) {
+export default function Onboarding({ accountName, initialName, initialEmail, signInPath, accountId, editMode = false }: { accountName: string; initialName: string; initialEmail: string; signInPath: string; accountId: string; editMode?: boolean }) {
+  // Welcome the signed-in person, even when they prepare another applicant's case.
+  const greeting = accountGreeting(accountName);
   const [caseState, setCaseState] = useState<CaseState | null>(null);
   const [answers, setAnswers] = useState<IntakeAnswers>({ ...blankAnswers, fullName: initialName });
   const [step, setStep] = useState<IntakeStep>("basics");
@@ -303,7 +306,7 @@ export default function Onboarding({ initialName, initialEmail, signInPath, acco
 
       {!loading && caseState && !completed && <form onSubmit={event => void saveStep(event)} className={styles.card}>
         <div className={styles.cardTop}><span className={styles.sectionLabel}>{INTAKE_STEP_LABELS[step]}</span><span className={styles.savedLabel}>{!hasDraftChanges && <Check size={14} />}{saving ? "Saving…" : hasDraftChanges ? "Unsaved answers" : caseState.intake ? "Progress saved" : "Signed in"}</span></div>
-        <div className={styles.stepHeading}><h1 ref={heading} tabIndex={-1}>{headings[step].title}</h1><p>{headings[step].description}</p></div>
+        <div className={styles.stepHeading}><h1 ref={heading} tabIndex={-1}>{step === "basics" ? greeting : headings[step].title}</h1><p>{step === "basics" ? "Welcome to your workspace. Let’s start with a few details about the person you’re preparing for." : headings[step].description}</p></div>
         <details key={`import-${step}`} className={styles.documentImport}>
           <summary><FileText size={17} aria-hidden="true" /><span>Fill from documents <em>Optional</em></span><ChevronDown size={16} aria-hidden="true" /></summary>
           <div className={styles.importBody}><FileFormImport contextKey={`${accountId}:${caseState.id}:${step}`} fields={intakeImportFields(step)} values={{ ...answers }} disabled={blocked || sessionExpired} saveNote={`Only answers on this step are filled. Review them, then ${updatingCompletedIntake ? "Save changes" : "Next"} to save this step.`} onApply={values => setAnswers(current => applyIntakeImportPatch(current, step, values))} /></div>

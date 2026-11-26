@@ -146,7 +146,7 @@ export async function readPasswordUser(db: DB, cookieHeader: string, secure = tr
   if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
   const row = await db.prepare('SELECT a.user_id,a.email,a.name FROM password_sessions s JOIN password_accounts a ON a.user_id=s.user_id WHERE s.token_hash=? AND s.expires_at>? AND a.verified_at IS NOT NULL')
     .bind(await tokenHash(token), Math.floor(Date.now() / 1000)).first<{ user_id: string; email: string; name: string }>();
-  return row ? { userId: row.user_id, email: row.email, displayName: row.name, fullName: row.name, provider: 'password' as const } : null;
+  return row ? { userId: row.user_id, email: row.email, displayName: row.name.trim() || row.email, fullName: row.name.trim() || null, provider: 'password' as const } : null;
 }
 
 async function rateLimit(db: DB, key: string, limit: number, window: number, now: number) {

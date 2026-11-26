@@ -86,14 +86,19 @@ async function complete(request: Request, postBody: string | undefined, sessionI
     method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(10000),
     body: JSON.stringify({ requestUri: request.url, ...(postBody !== undefined ? { postBody } : {}), sessionId, returnSecureToken: true }),
   });
-  const data = await response.json() as { idToken?: string; localId?: string; email?: string; emailVerified?: boolean; displayName?: string; needConfirmation?: boolean };
+  const data = await response.json() as { idToken?: string; localId?: string; email?: string; emailVerified?: boolean; displayName?: string; fullName?: string; firstName?: string; lastName?: string; needConfirmation?: boolean };
   if (!response.ok || !data.idToken || !data.localId || !data.email || data.emailVerified !== true || data.needConfirmation) throw new Error('Identity could not be verified');
   const email = data.email.trim().toLowerCase(), userId = `password:${data.localId}`, db = env.DB!;
   // Email ownership must never link an unrelated local/Firebase identity.
-  const existing = await db.prepare('SELECT user_id, email, verified_at FROM password_accounts WHERE user_id=? OR email=?')
-    .bind(userId, email).all<{ user_id: string; email: string; verified_at: number | null }>();
+  const existing = await db.prepare('SELECT user_id, email, name, verified_at FROM password_accounts WHERE user_id=? OR email=?')
+    .bind(userId, email).all<{ user_id: string; email: string; name: string; verified_at: number | null }>();
   if (existing.results.some(row => row.user_id !== userId || row.email !== email)) throw new Error('Account identity changed');
-  const name = (data.displayName || email.split('@')[0]).trim().slice(0, 200), now = Math.floor(Date.now() / 1000);
+  const cleanName = (value: unknown) => typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, 200) : '';
+  // Apple may only supply the name on the first sign-in. Keep that name when
+  // later responses omit it, and never manufacture one from an email address.
+  const providerName = cleanName(data.displayName) || cleanName(data.fullName) ||
+    cleanName([cleanName(data.firstName), cleanName(data.lastName)].filter(Boolean).join(' '));
+  const name = providerName || cleanName(existing.results[0]?.name), now = Math.floor(Date.now() / 1000);
   if (existing.results.length) {
     await db.prepare('UPDATE password_accounts SET name=?, verified_at=?, password_hash=? WHERE user_id=?')
       .bind(name, existing.results[0].verified_at ?? now, `firebase:${data.localId}`, userId).run();

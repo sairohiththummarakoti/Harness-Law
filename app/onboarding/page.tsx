@@ -27,5 +27,5 @@ export default async function OnboardingPage({ searchParams }: { searchParams: P
     // without these parameters and go straight to the saved workspace.
     redirect("/onboarding?edit=1&welcome=1");
   }
-  return <Onboarding accountId={user.userId} initialName={user.fullName ?? ""} initialEmail={user.email} signInPath="/signin" editMode={params.welcome !== "1"} />;
+  return <Onboarding accountId={user.userId} accountName={user.fullName || user.displayName} initialName={user.fullName ?? ""} initialEmail={user.email} signInPath="/signin" editMode={params.welcome !== "1"} />;
 }

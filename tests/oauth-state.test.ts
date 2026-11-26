@@ -4,6 +4,8 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 // @ts-ignore Explicit TypeScript extension for Node's test runner.
 import { finishOAuth, startOAuth } from '../lib/auth/oauth.ts';
+// @ts-ignore Explicit TypeScript extension for Node's test runner.
+import { readPasswordUser } from '../lib/auth/email-password.ts';
 
 const origin = 'https://harnesslaw.test';
 const state = 'opaque-firebase-state/with+characters';
@@ -16,7 +18,7 @@ function fixture() {
     async run() { return sqlite.prepare(sql).run(...values); },
   }; } }; } };
   const calls: { endpoint: string; body: Record<string, unknown> }[] = [];
-  let identity = { idToken: 'firebase-token', localId: 'firebase-user', email: 'applicant@example.com', emailVerified: true, displayName: 'Applicant' };
+  let identity: { idToken: string; localId: string; email: string; emailVerified: boolean; displayName?: string; fullName?: string; firstName?: string; lastName?: string } = { idToken: 'firebase-token', localId: 'firebase-user', email: 'applicant@example.com', emailVerified: true, displayName: 'Applicant' };
   let mismatchSession = false;
   let startError: string | null = null;
   const env = { DB: db as unknown as D1Database, FIREBASE_API_KEY: 'test-only', fetch: (async (input, init) => {
@@ -30,7 +32,7 @@ function fixture() {
     if (endpoint.includes('signInWithIdp')) return Response.json(identity);
     throw new Error('Unexpected external request');
   }) as typeof fetch };
-  return { sqlite, env, calls, setVerified(value: boolean) { identity = { ...identity, emailVerified: value }; }, mismatchSession() { mismatchSession = true; }, startError(value: string) { startError = value; } };
+  return { sqlite, env, calls, setVerified(value: boolean) { identity = { ...identity, emailVerified: value }; }, setName(value: Pick<typeof identity, 'displayName' | 'fullName' | 'firstName' | 'lastName'>) { identity = { ...identity, displayName: undefined, fullName: undefined, firstName: undefined, lastName: undefined, ...value }; }, mismatchSession() { mismatchSession = true; }, startError(value: string) { startError = value; } };
 }
 async function begin(f: ReturnType<typeof fixture>, provider = 'google') {
   const response = await startOAuth(new Request(`${origin}/api/auth/oauth/${provider}`), provider, f.env);
@@ -61,6 +63,49 @@ test('OAuth transaction exchanges only the matching state and original Firebase 
     assert.equal(row.user_id, 'password:firebase-user'); assert.equal(row.password_hash, 'firebase:firebase-user');
     assert.ok(response.headers.getSetCookie().some(value => value.startsWith('__Host-harness_password_session=')));
     assert.equal(response.headers.getSetCookie().filter(value => /harness_oauth_.*Max-Age=0/.test(value)).length, 2);
+  } finally { f.sqlite.close(); }
+});
+
+test('OAuth retains a provider name when later Apple sign-ins omit it', async () => {
+  const f = fixture(); try {
+    f.setName({ displayName: '  Maya   Chen  ' });
+    let cookie = await begin(f, 'apple');
+    let response = await finishOAuth(callback(cookie, new URLSearchParams({ state, code: 'first-code' })), f.env);
+    assert.equal(response.status, 200);
+    for (const omitted of [{}, { displayName: '  ' }]) {
+      f.setName(omitted);
+      cookie = await begin(f, 'apple');
+      response = await finishOAuth(callback(cookie, new URLSearchParams({ state, code: 'later-code' })), f.env);
+      assert.equal(response.status, 200);
+      const account = f.sqlite.prepare('SELECT name FROM password_accounts').get() as { name: string };
+      assert.equal(account.name, 'Maya Chen');
+    }
+  } finally { f.sqlite.close(); }
+});
+
+test('OAuth captures verified provider full-name fields without relying only on displayName', async () => {
+  for (const supplied of [{ fullName: 'Maya Chen' }, { firstName: 'Maya', lastName: 'Chen' }]) {
+    const f = fixture(); try {
+      f.setName(supplied);
+      const cookie = await begin(f, 'microsoft');
+      const response = await finishOAuth(callback(cookie, new URLSearchParams({ state, code: 'name-code' })), f.env);
+      assert.equal(response.status, 200);
+      assert.equal((f.sqlite.prepare('SELECT name FROM password_accounts').get() as { name: string }).name, 'Maya Chen');
+    } finally { f.sqlite.close(); }
+  }
+});
+
+test('OAuth without a provider name leaves the greeting unnamed instead of using an email prefix', async () => {
+  const f = fixture(); try {
+    f.setName({});
+    const cookie = await begin(f, 'apple');
+    const response = await finishOAuth(callback(cookie, new URLSearchParams({ state, code: 'no-name-code' })), f.env);
+    assert.equal(response.status, 200);
+    const sessionCookie = response.headers.getSetCookie().find(value => value.startsWith('__Host-harness_password_session='))!.split(';')[0];
+    const user = await readPasswordUser(f.env.DB, sessionCookie, true);
+    assert.equal(user?.fullName, null);
+    assert.equal(user?.displayName, 'applicant@example.com');
+    assert.equal((f.sqlite.prepare('SELECT name FROM password_accounts').get() as { name: string }).name, '');
   } finally { f.sqlite.close(); }
 });
 
