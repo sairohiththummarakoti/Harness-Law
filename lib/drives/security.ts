@@ -36,5 +36,5 @@ export function connectionName(value: unknown): string | null {
   return name.length > 0 && name.length <= 120 && !/[\x00-\x1f\x7f]/.test(name) ? name : null;
 }
 export function returnPath(value: unknown): string {
-  return value === '/evidence-setup' ? value : '/workspace?view=evidence';
+  return value === '/evidence-setup' || value === '/evidence-setup?edit=1' ? value : '/workspace?view=evidence';
 }

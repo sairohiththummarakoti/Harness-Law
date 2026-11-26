@@ -128,6 +128,19 @@ test('OAuth callback binds browser, owner, one-use state and PKCE; keeps pending
   assert.match(replay.headers.get('location')!, /driveError=/); assert.equal(f.tracker.tokenExchanges, 1);
 });
 
+test('OAuth returns intake edits to Evidence setup and preserves the edit flag', async () => {
+  const f = await fixture();
+  const start = await handleDriveConnect(request('/api/drives/connect', { provider: 'google_drive', returnTo: '/evidence-setup?edit=1' }), f.deps);
+  const url = new URL((await start.json() as { authorizationUrl: string }).authorizationUrl);
+  const cookie = start.headers.get('set-cookie')!.split(';')[0];
+  const done = await handleDriveCallback(request(`/api/drives/callback?code=test-code&state=${url.searchParams.get('state')}`, undefined, { cookie }), f.deps);
+  const destination = new URL(done.headers.get('location')!);
+  assert.equal(destination.origin, 'https://app.test');
+  assert.equal(destination.pathname, '/evidence-setup');
+  assert.equal(destination.searchParams.get('edit'), '1');
+  assert.match(destination.searchParams.get('driveConnection')!, /^drv-/);
+});
+
 test('OAuth rejects expired state and cannot redirect away from the application', async () => {
   const f = await fixture();
   const start = await handleDriveConnect(request('/api/drives/connect', { provider: 'google_drive', returnTo: 'https://attacker.test' }), f.deps);

@@ -306,3 +306,27 @@ test('editing a deferred intake preserves newer profile fields and still allows 
   assert.deepEqual(state.criteria,['C04']);
   assert.ok(caseSchema.safeParse(state).success);
 });
+
+test('revisiting the complete questionnaire saves one answer at a time without resetting evidence or completion history', () => {
+  let state = throughReview();
+  state.profile.phone = '+1 555 999 9999';
+  state.professional.role = 'Newer workspace role';
+  state.criteria = [];
+  state.folders = [{ id: 'existing-folder', name: 'Publications', parentId: null, origin: 'upload' }];
+  state.documents = [{ ...createSampleCase().documents[0], sample: false, objectId: 'object-existing', folderId: 'existing-folder' }];
+  const before = structuredClone(state);
+  const updatedAnswers = { ...intakeAnswersFromCase(state), fullName: 'Updated Applicant', notes: 'Updated context' };
+  for (const step of getIntakeSteps(updatedAnswers.visaType)) {
+    state = applyIntakeEdit(state, step, updatedAnswers);
+    assert.ok(caseSchema.safeParse(state).success, `schema accepts edited ${step}`);
+    assert.equal(state.intake!.firstCompletedAt, before.intake!.firstCompletedAt);
+    assert.ok(state.intake!.completedAt);
+    assert.deepEqual(state.documents, before.documents);
+    assert.deepEqual(state.folders, before.folders);
+    assert.deepEqual(state.criteria, []);
+    assert.equal(state.profile.phone, before.profile.phone);
+    assert.equal(state.professional.role, before.professional.role);
+  }
+  assert.equal(state.profile.fullName, 'Updated Applicant');
+  assert.equal(state.intake!.answers.notes, 'Updated context');
+});

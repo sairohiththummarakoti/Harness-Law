@@ -105,13 +105,18 @@ export default function Onboarding({ accountName, initialName, initialEmail, sig
   intakeComplete.current = completed;
 
   const answersFromCase = useCallback((state: CaseState) => intakeAnswersFromCase(state, initialName), [initialName]);
-  const adoptSaved = useCallback((state: CaseState) => {
+  const adoptSaved = useCallback((state: CaseState, requestedStep?: IntakeStep) => {
     const saved = answersFromCase(state);
     setCaseState(state); savedAnswers.current = saved; setAnswers(saved);
+    const savedSteps = getIntakeSteps(saved.visaType);
     const savedStep = state.intake?.step ?? "basics";
-    setStep(getIntakeSteps(saved.visaType).includes(savedStep) ? savedStep : "visa");
-    setCompleted(!!state.intake?.completedAt); setConflict(null); setConflictNeedsLoad(false);
-  }, [answersFromCase]);
+    // Explicit edits restart the visible questionnaire without rewinding saved
+    // completion/progress. Conflict adoption keeps the active valid question.
+    const visibleStep = editMode ? requestedStep ?? "basics" : savedStep;
+    setStep(savedSteps.includes(visibleStep) && savedSteps.indexOf(visibleStep) <= savedSteps.indexOf(savedStep)
+      ? visibleStep : savedSteps.includes(savedStep) ? savedStep : "visa");
+    setCompleted(!editMode && !!state.intake?.completedAt); setConflict(null); setConflictNeedsLoad(false);
+  }, [answersFromCase, editMode]);
 
   const loadCase = useCallback(async (signal?: AbortSignal) => {
     setLoading(true); setError(""); setSessionExpired(false);
@@ -206,11 +211,11 @@ export default function Onboarding({ accountName, initialName, initialEmail, sig
         if (merged.visaType !== "eb1a") { merged.criteria = []; merged.criteriaUnsure = false; merged.majorAward = ""; }
         return merged;
       });
-      setCompleted(!!acceptedState.intake?.completedAt);
-      if ((editMode && hasCompletedRequiredIntake(acceptedState)) || (acceptedState.intake?.completedAt && (updatingCompletedIntake || step === "review"))) {
+      setCompleted(!editMode && !!acceptedState.intake?.completedAt);
+      if (acceptedState.intake?.completedAt && (editMode ? step === "review" : updatingCompletedIntake || step === "review")) {
         currentAnswers.current = accepted; intakeComplete.current = true; saveInFlight.current = false;
-        window.location.assign(editMode ? "/workspace?view=overview" : "/evidence-setup"); return;
-      } else if (updatingCompletedIntake) {
+        window.location.assign(editMode ? "/evidence-setup?edit=1" : "/evidence-setup"); return;
+      } else if (updatingCompletedIntake && !editMode) {
         setStep(acceptedState.intake?.step ?? "review");
         currentAnswers.current = accepted;
         setAnswers(accepted);
@@ -289,17 +294,18 @@ export default function Onboarding({ accountName, initialName, initialEmail, sig
   const updatingCompletedIntake = !!(caseState?.intake?.completedAt || caseState?.intake?.firstCompletedAt || (editMode && caseState && hasCompletedRequiredIntake(caseState)));
   const isEB1A = answers.visaType === "eb1a";
   const coreSaved = !!caseState && hasCompletedRequiredIntake(caseState);
-  const canLeaveIntake = editMode || coreSaved;
-  const exitPath = editMode ? "/workspace?view=overview" : "/evidence-setup";
   const requiredStep = REQUIRED_INTAKE_STEPS.includes(step);
+  const canLeaveIntake = coreSaved && (!editMode || !requiredStep);
+  const exitPath = editMode ? "/evidence-setup?edit=1" : "/evidence-setup";
+  const saveAction = step === "review" ? "Finish intake" : updatingCompletedIntake && !editMode ? "Save changes" : "Next";
 
   return <EvidenceLibraryProvider value={{ documents: caseState?.documents ?? [], folders: caseState?.folders ?? [], mode: "personal", caseId: caseState?.id ?? "loading", accountId, consent: !!caseState?.consent, disabled: loading || blocked || sessionExpired, upload: retainIntakeFile, read: (document, signal) => readEvidenceFile(document, accountId, caseState?.id ?? "", signal), grantConsent: grantFileConsent }}><div className={styles.setup}>
     <a className={styles.skipLink} href="#intake-form">Skip to intake</a>
     <main className={styles.main}>
       <section className={styles.content}>
       <header className={styles.header}>
-        {editMode ? <a className={styles.brand} href={exitPath} onClick={leaveIntake} aria-disabled={saving} aria-label="Harness Law overview"><BrandLogo /></a> : <span className={styles.brand}><BrandLogo /></span>}
-        {editMode && <a className={styles.headerBack} href={exitPath} onClick={leaveIntake} aria-disabled={saving}><ArrowLeft size={16} aria-hidden="true" /><span>Back to overview</span></a>}
+        {editMode ? <a className={styles.brand} href="/workspace?view=overview" onClick={leaveIntake} aria-disabled={saving} aria-label="Harness Law overview"><BrandLogo /></a> : <span className={styles.brand}><BrandLogo /></span>}
+        {editMode && <a className={styles.headerBack} href="/workspace?view=overview" onClick={leaveIntake} aria-disabled={saving}><ArrowLeft size={16} aria-hidden="true" /><span>Back to overview</span></a>}
       </header>
       <div className={styles.contentInner} id="intake-form" tabIndex={-1}>
       <div className={styles.progressHeader}><span>{completed || editMode ? "YOUR INTAKE" : "A LITTLE ABOUT YOU"}</span><span>{completed ? "Answers saved" : `Step ${position + 1} of ${sequence.length}`}</span></div>
@@ -313,7 +319,7 @@ export default function Onboarding({ accountName, initialName, initialEmail, sig
         <div className={styles.stepHeading}><h1 ref={heading} tabIndex={-1}>{step === "basics" ? greeting : headings[step].title}</h1><p>{step === "basics" ? "Welcome to your workspace. Let’s start with a few details about the person you’re preparing for." : headings[step].description}</p></div>
         <details key={`import-${step}`} className={styles.documentImport}>
           <summary><FileText size={17} aria-hidden="true" /><span>Fill from documents <em>Optional</em></span><ChevronDown size={16} aria-hidden="true" /></summary>
-          <div className={styles.importBody}><FileFormImport contextKey={`${accountId}:${caseState.id}:${step}`} fields={intakeImportFields(step)} values={{ ...answers }} disabled={blocked || sessionExpired} saveNote={`Only answers on this step are filled. Review them, then ${updatingCompletedIntake ? "Save changes" : "Next"} to save this step.`} onApply={values => setAnswers(current => applyIntakeImportPatch(current, step, values))} /></div>
+          <div className={styles.importBody}><FileFormImport contextKey={`${accountId}:${caseState.id}:${step}`} fields={intakeImportFields(step)} values={{ ...answers }} disabled={blocked || sessionExpired} saveNote={`Only answers on this step are filled. Review them, then choose ${saveAction} to save this step.`} onApply={values => setAnswers(current => applyIntakeImportPatch(current, step, values))} /></div>
         </details>
         <fieldset className={styles.fields} disabled={saving}>
           <legend className={styles.srOnly}>{INTAKE_STEP_LABELS[step]}</legend>
@@ -351,16 +357,16 @@ export default function Onboarding({ accountName, initialName, initialEmail, sig
           </>}
         </fieldset>
         {error && <div className={styles.error} role="alert"><p>{error}</p>{sessionExpired && <><a href={signInPath} target="_blank" rel="noopener noreferrer">Sign in again (new tab)</a><p>Then return here. Use the same account and sign-in method.</p><button type="button" disabled={saving} onClick={() => void recheckSession()}>Check sign-in</button></>}{conflictNeedsLoad && <button type="button" disabled={saving} onClick={() => void loadLatestForComparison()}>Load latest saved answers</button>}</div>}
-        {conflict && <section className={styles.conflict} aria-label="Compare saved intake"><h2>Latest saved answers</h2><dl>{summaryRows(answersFromCase(conflict)).map(row => <div key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl><p>{!conflictCanRetry ? "The saved visa choice or intake progress changed. Continue from the saved answers to answer the questions in the updated flow. Your draft remains above for you to copy before replacing it." : step === "review" ? "Finishing uses the saved answers above and the additional context you entered. Use saved answers to review them first, or finish with those answers." : "Your draft remains above. Retry saves only this question onto the latest case. Use saved answers replaces this window’s draft with the latest saved intake."}</p><div className={styles.conflictActions}><button type="button" className={styles.secondary} disabled={saving} onClick={() => { adoptSaved(conflict); setError(""); }}>Use saved answers</button>{conflictCanRetry && <button type="button" className={styles.primary} disabled={saving} onClick={() => void saveStep(undefined, conflict)}>{step === "review" ? "Finish with saved answers" : "Keep this answer and retry"}</button>}</div></section>}
-        <div className={styles.actions}><div className={styles.actionButtons}>{position > 0 && <button type="button" className={styles.back} disabled={blocked} onClick={() => editStep(sequence[position - 1])}><ArrowLeft size={16} aria-hidden="true" />Back</button>}<button type="submit" className={styles.primary} disabled={blocked}>{saving ? <><Loader2 className={styles.spinner} size={17} />Saving…</> : <>{updatingCompletedIntake ? "Save changes" : step === "review" ? "Finish intake" : "Next"}<ArrowRight size={17} aria-hidden="true" /></>}</button></div>{canLeaveIntake && <a className={styles.laterLink} href={exitPath} onClick={leaveIntake} aria-disabled={saving}>{editMode ? "Back to overview" : "Finish optional steps later"}</a>}</div>
-        <p className={styles.saveNote}>{editMode ? "Each saved answer updates your intake. You can return to Overview at any time." : requiredStep ? "Complete steps 1–4 to continue. Each step saves when you choose Next." : "Your required details are saved. Finish these optional questions now or return from Overview later."}</p>
+        {conflict && <section className={styles.conflict} aria-label="Compare saved intake"><h2>Latest saved answers</h2><dl>{summaryRows(answersFromCase(conflict)).map(row => <div key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl><p>{!conflictCanRetry ? "The saved visa choice or intake progress changed. Continue from the saved answers to answer the questions in the updated flow. Your draft remains above for you to copy before replacing it." : step === "review" ? "Finishing uses the saved answers above and the additional context you entered. Use saved answers to review them first, or finish with those answers." : "Your draft remains above. Retry saves only this question onto the latest case. Use saved answers replaces this window’s draft with the latest saved intake."}</p><div className={styles.conflictActions}><button type="button" className={styles.secondary} disabled={saving} onClick={() => { adoptSaved(conflict, editMode ? step : undefined); setError(""); }}>Use saved answers</button>{conflictCanRetry && <button type="button" className={styles.primary} disabled={saving} onClick={() => void saveStep(undefined, conflict)}>{step === "review" ? "Finish with saved answers" : "Keep this answer and retry"}</button>}</div></section>}
+        <div className={styles.actions}><div className={styles.actionButtons}>{position > 0 && <button type="button" className={styles.back} disabled={blocked} onClick={() => editStep(sequence[position - 1])}><ArrowLeft size={16} aria-hidden="true" />Back</button>}<button type="submit" className={styles.primary} disabled={blocked}>{saving ? <><Loader2 className={styles.spinner} size={17} />Saving…</> : <>{saveAction}<ArrowRight size={17} aria-hidden="true" /></>}</button></div>{canLeaveIntake && <a className={styles.laterLink} href={exitPath} onClick={leaveIntake} aria-disabled={saving}>Finish optional steps later</a>}</div>
+        <p className={styles.saveNote}>{editMode ? requiredStep ? "Review your saved answers. Each step saves when you choose Next; your existing evidence stays in place." : "Your required details are saved. Finish these optional questions now or continue to your evidence." : requiredStep ? "Complete steps 1–4 to continue. Each step saves when you choose Next." : "Your required details are saved. Finish these optional questions now or return from Overview later."}</p>
       </form>}
 
       {!loading && caseState && completed && <section className={styles.card}>
         <div className={styles.stepHeading}><h1 ref={heading} tabIndex={-1}>Your intake, at a glance.</h1><p>Your starting point, kept in one place. Edit any answer as your plans evolve.</p></div>
         <dl className={styles.summary}>{summaryRows(answers).map(row => <div key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd><button type="button" onClick={() => editStep(row.step)} aria-label={`Edit ${row.label.toLowerCase()}`}>Edit</button></div>)}</dl>
         {!isEB1A && <p className={styles.helpText}>Your {visaLabel(answers.visaType)} interest is saved. The preparation tools currently focus on EB-1A.</p>}
-        <div className={styles.completionActions}><a className={styles.primary} href={exitPath} onClick={leaveIntake}>{editMode ? "Back to overview" : "Continue to evidence"}<ArrowRight size={17} aria-hidden="true" /></a><button className={styles.back} type="button" onClick={() => editStep("review")}>Edit additional details</button></div>
+        <div className={styles.completionActions}><a className={styles.primary} href={exitPath} onClick={leaveIntake}>Continue to evidence<ArrowRight size={17} aria-hidden="true" /></a><button className={styles.back} type="button" onClick={() => editStep("review")}>Edit additional details</button></div>
       </section>}
       </div>
       <footer className={styles.footer}><ShieldCheck size={15} aria-hidden="true" /><span>Private to your account{initialEmail && <span className={styles.accountEmail}> · {initialEmail}</span>}</span></footer>
