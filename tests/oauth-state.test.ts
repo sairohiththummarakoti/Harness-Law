@@ -18,19 +18,24 @@ function fixture() {
   const calls: { endpoint: string; body: Record<string, unknown> }[] = [];
   let identity = { idToken: 'firebase-token', localId: 'firebase-user', email: 'applicant@example.com', emailVerified: true, displayName: 'Applicant' };
   let mismatchSession = false;
+  let startError: string | null = null;
   const env = { DB: db as unknown as D1Database, FIREBASE_API_KEY: 'test-only', fetch: (async (input, init) => {
     const endpoint = String(input), body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     calls.push({ endpoint, body });
-    if (endpoint.includes('createAuthUri')) return Response.json({ authUri: `https://accounts.google.com/o/oauth2/auth?state=${encodeURIComponent(state)}`, sessionId: mismatchSession ? 'mismatch' : body.sessionId });
+    if (endpoint.includes('createAuthUri')) {
+      if (startError) return Response.json({ error: { message: startError } }, { status: 400 });
+      const host = body.providerId === 'apple.com' ? 'appleid.apple.com' : body.providerId === 'microsoft.com' ? 'login.microsoftonline.com' : 'accounts.google.com';
+      return Response.json({ authUri: `https://${host}/authorize?state=${encodeURIComponent(state)}`, sessionId: mismatchSession ? 'mismatch' : body.sessionId });
+    }
     if (endpoint.includes('signInWithIdp')) return Response.json(identity);
     throw new Error('Unexpected external request');
   }) as typeof fetch };
-  return { sqlite, env, calls, setVerified(value: boolean) { identity = { ...identity, emailVerified: value }; }, mismatchSession() { mismatchSession = true; } };
+  return { sqlite, env, calls, setVerified(value: boolean) { identity = { ...identity, emailVerified: value }; }, mismatchSession() { mismatchSession = true; }, startError(value: string) { startError = value; } };
 }
-async function begin(f: ReturnType<typeof fixture>) {
-  const response = await startOAuth(new Request(`${origin}/api/auth/oauth/google`), 'google', f.env);
+async function begin(f: ReturnType<typeof fixture>, provider = 'google') {
+  const response = await startOAuth(new Request(`${origin}/api/auth/oauth/${provider}`), provider, f.env);
   assert.equal(response.status, 303);
-  assert.match(response.headers.get('Location')!, /^https:\/\/accounts\.google\.com/);
+  assert.match(response.headers.get('Location')!, /^https:\/\/(accounts\.google\.com|appleid\.apple\.com|login\.microsoftonline\.com)/);
   const cookies = response.headers.getSetCookie();
   assert.equal(cookies.length, 2);
   for (const cookie of cookies) assert.match(cookie, /HttpOnly; SameSite=Lax; Max-Age=600; Secure/);
@@ -119,5 +124,89 @@ test('OAuth fails closed for a mismatched Firebase start session, cross-origin P
     const cookie = '__Host-harness_oauth_state=' + 'a'.repeat(43) + '; __Host-harness_oauth_session=' + 'b'.repeat(43);
     const oversized = callback(cookie, new URLSearchParams({ state, id_token: 'x'.repeat(17000) }));
     assert.equal((await finishOAuth(oversized, f.env)).status, 413);
+  } finally { f.sqlite.close(); }
+});
+
+test('Apple and Microsoft starts use their Firebase provider IDs and preserve the same bound transaction', async () => {
+  for (const provider of ['apple', 'microsoft']) {
+    const f = fixture(); try {
+      const cookie = await begin(f, provider);
+      assert.equal(f.calls[0].body.providerId, `${provider}.com`);
+      assert.equal(f.calls[0].body.continueUri, `${origin}/api/auth/oauth/callback`);
+      if (provider === 'apple') {
+        assert.equal(f.calls[0].body.oauthScope, 'email name');
+        assert.deepEqual(f.calls[0].body.customParameter, { response_mode: 'form_post' });
+      }
+      const response = await finishOAuth(callback(cookie, new URLSearchParams({ state, code: `${provider}-code` })), f.env);
+      assert.equal(response.status, 200);
+      assert.equal(f.calls[1].body.sessionId, f.calls[0].body.sessionId);
+    } finally { f.sqlite.close(); }
+  }
+});
+
+test('Unconfigured providers return a useful sign-in notice without exposing upstream errors', async () => {
+  for (const provider of ['apple', 'microsoft']) {
+    const f = fixture(); try {
+      f.startError('OPERATION_NOT_ALLOWED : The provider is not configured. Internal details.');
+      const response = await startOAuth(new Request(`${origin}/api/auth/oauth/${provider}`), provider, f.env);
+      assert.equal(response.status, 303);
+      const notice = new URL(response.headers.get('Location')!).searchParams.get('oauth_notice');
+      assert.match(notice!, /sign-in is not available yet/);
+      assert.match(notice!, /choose another sign-in method/);
+      assert.doesNotMatch(notice!, /Internal|OPERATION_NOT_ALLOWED/);
+      assert.ok(response.headers.getSetCookie().every(cookie => cookie.includes('Max-Age=0')));
+    } finally { f.sqlite.close(); }
+  }
+});
+
+test('Unsupported providers and cross-origin starts never contact Firebase', async () => {
+  const f = fixture(); try {
+    for (const provider of ['github', '__proto__', 'constructor', 'apple.com']) {
+      assert.equal((await startOAuth(new Request(`${origin}/api/auth/oauth/${provider}`), provider, f.env)).status, 400);
+    }
+    assert.equal((await startOAuth(new Request(`${origin}/api/auth/oauth/apple`, { method: 'POST', headers: { origin: 'https://attacker.test' } }), 'apple', f.env)).status, 403);
+    assert.equal(f.calls.length, 0);
+  } finally { f.sqlite.close(); }
+});
+
+function appleCallback(body: string, requestOrigin = 'https://appleid.apple.com') {
+  return new Request(`${origin}/api/auth/oauth/callback`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: requestOrigin, 'sec-fetch-site': 'cross-site' }, body });
+}
+
+test('Apple form_post bridges to same-origin validation without requiring cross-site cookies or issuing a session', async () => {
+  const f = fixture(); try {
+    const cookie = await begin(f, 'apple');
+    const body = new URLSearchParams({ state, code: 'apple-code', user: JSON.stringify({ name: { firstName: 'Applicant' } }) }).toString();
+    const bridge = await finishOAuth(appleCallback(body), f.env);
+    assert.equal(bridge.status, 200);
+    assert.match(bridge.headers.get('Content-Security-Policy')!, /form-action 'none'/);
+    assert.equal(bridge.headers.get('Cache-Control'), 'no-store');
+    assert.equal(bridge.headers.get('Referrer-Policy'), 'no-referrer');
+    assert.equal(bridge.headers.getSetCookie().length, 0);
+    assert.equal(f.calls.length, 1);
+    const html = await bridge.text();
+    assert.match(html, /credentials:'same-origin'/);
+    assert.match(html, /Content-Type':'application\/json'/);
+    const response = await finishOAuth(callback(cookie, new URLSearchParams(body)), f.env);
+    assert.equal(response.status, 200);
+    assert.equal(f.calls[1].body.postBody, body);
+    assert.equal(f.calls[1].body.sessionId, f.calls[0].body.sessionId);
+  } finally { f.sqlite.close(); }
+});
+
+test('Apple form bridge rejects other origins, oversized or duplicate-state responses and escapes script content', async () => {
+  const f = fixture(); try {
+    const body = `state=${encodeURIComponent(state)}&code=</script><script>alert(1)</script>`;
+    for (const requestOrigin of ['https://attacker.test', 'https://appleid.apple.com.attacker.test', origin, 'null']) {
+      assert.equal((await finishOAuth(appleCallback(body, requestOrigin), f.env)).status, 403);
+    }
+    assert.equal((await finishOAuth(appleCallback(`state=${state}&state=${state}&code=code`), f.env)).status, 400);
+    assert.equal((await finishOAuth(appleCallback('code=code'), f.env)).status, 400);
+    assert.equal((await finishOAuth(appleCallback(`state=${state}&code=${'x'.repeat(17000)}`), f.env)).status, 413);
+    const html = await (await finishOAuth(appleCallback(body), f.env)).text();
+    assert.doesNotMatch(html, /<script>alert/);
+    assert.match(html, /\\u003c\/script\\u003e/);
+    assert.equal(f.calls.length, 0);
+    assert.equal((f.sqlite.prepare('SELECT COUNT(*) n FROM password_sessions').get() as { n: number }).n, 0);
   } finally { f.sqlite.close(); }
 });

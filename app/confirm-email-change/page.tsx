@@ -1,5 +1,5 @@
 import AuthForm from '../auth-form';
-import { Scale } from 'lucide-react';
+import { BrandLogo } from "@/components/brand-logo";
 import styles from '../entry.module.css';
 
 export const metadata = { title: 'Confirm email change · Harness Law' };
@@ -8,7 +8,7 @@ export default function ConfirmEmailChange() {
   return (
     <div className={styles.entry}>
       <header className={styles.header}>
-        <a className={styles.brand} href="/" aria-label="Harness Law home"><Scale size={28} /><span>Harness Law</span></a>
+        <a className={styles.brand} href="/" aria-label="Harness Law home"><BrandLogo /></a>
         <a className={styles.homeLink} href="/account">Account</a>
       </header>
       <main className={styles.authLayout}>
@@ -23,7 +23,7 @@ export default function ConfirmEmailChange() {
           <AuthForm mode="email-change" />
         </section>
       </main>
-      <footer className={styles.footer}><span>Harness Law</span><span>Your story. Your next step.</span></footer>
+      <footer className={styles.footer}><span>© {new Date().getFullYear()} Harness Law</span><a href="/privacy">Privacy</a><a href="/terms">Terms</a></footer>
     </div>
   );
 }
