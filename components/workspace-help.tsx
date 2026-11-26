@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, ChevronDown, ChevronRight, Fingerprint, FolderOpen, UserRound } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronRight, FolderOpen, UserRound } from "lucide-react";
 import styles from "./workspace-help.module.css";
 
 const steps = [
@@ -17,13 +17,6 @@ const steps = [
     title: "Organize your evidence",
     description: "Keep your documents together and connect them to relevant criteria. Uploaded files are stored privately; scanning and extraction are not available yet.",
     action: "Open evidence library",
-  },
-  {
-    page: "facts",
-    icon: Fingerprint,
-    title: "Check facts against sources",
-    description: "Review available facts, flag discrepancies, and leave uncertain details unresolved. The sample demonstrates this step; personal uploads do not generate source facts yet.",
-    action: "Open facts & sources",
   },
   {
     page: "composition",

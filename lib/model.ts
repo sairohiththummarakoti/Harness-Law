@@ -298,7 +298,7 @@ export function getBlockers(s:CaseState):Blocker[]{
     const omitted=s.criteria.filter(c=>!s.composition!.selected.some(x=>x.criterion===c));
     if(omitted.length)out.push({id:'omitted',title:`${omitted.length} selected criteria omitted`,detail:`Working draft gaps: ${omitted.join(', ')}. Review their treatment before finalization.`,page:'composition'});
   }
-  if(s.facts.some(f=>f.status==='unresolved'||f.status==='issue'))out.push({id:'facts',title:'Resolve outstanding facts',detail:'Unconfirmed or conflicting facts remain in this case.',page:'facts'});
+  if(s.facts.some(f=>f.status==='unresolved'||f.status==='issue'))out.push({id:'facts',title:'Resolve outstanding facts',detail:'Open the relevant file in Evidence library to review its unconfirmed or conflicting details.',page:'evidence'});
   if(!s.forms.reviewed)out.push({id:'forms',title:'Review form fields',detail:'Required field information must be reviewed before preparing an official form.',page:'forms'});
   out.push({id:'official-forms',title:'Official form templates are not connected',detail:'This release provides a field worksheet. Current official templates and mappings must be validated before final filing output.',page:'forms'});
   out.push({id:'final-service',title:'Final packet service is not connected',detail:'Download a clearly labeled working draft. Official form assembly, exhibit pagination, and immutable final-package approval are pending integration.',page:'final'});
