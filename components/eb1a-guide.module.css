@@ -17,7 +17,7 @@
 .sectionHeading h2 { margin: 0; color: var(--brand-ink, #143b2e); font-size: 23px; font-weight: 500; line-height: 1.4; letter-spacing: -.6px; }
 .sectionHeading p { margin: 5px 0 0; color: var(--brand-muted, #5d7068); font-size: 14px; line-height: 1.65; }
 .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; gap: 18px; }
-.tile { display: flex; flex-direction: column; min-width: 0; min-height: 246px; padding: 23px 23px 0; border: 1px solid #d4dfd6; border-radius: 14px; background: #fff; box-shadow: 0 2px 8px #173c2b03; transition: border-color .15s, box-shadow .15s; }
+.tile { position: relative; isolation: isolate; display: flex; flex-direction: column; min-width: 0; min-height: 246px; padding: 23px 23px 0; border: 1px solid #d4dfd6; border-radius: 14px; background: #fff; box-shadow: 0 2px 8px #173c2b03; transition: border-color .15s, box-shadow .15s; }
 .tile:hover { border-color: #9fbba9; box-shadow: 0 4px 14px #173c2b08; }
 .tile.selected { border-color: #89ab77; box-shadow: inset 0 0 0 1px #89ab7726; background: #fcfef8; }
 .tileTop { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 17px; }
@@ -32,12 +32,13 @@
 .indigo { color: #5367ab; background: #e9edfc; }
 .green { color: #367745; background: #e4f1dc; }
 .coral { color: #b45b41; background: #fcebe3; }
-.selectControl { display: inline-flex; align-items: center; justify-content: flex-end; gap: 7px; min-height: 42px; cursor: pointer; color: #5b7163; font-size: 14px; line-height: 1.4; }
+.selectControl { position: relative; z-index: 2; display: inline-flex; align-items: center; justify-content: flex-end; gap: 7px; min-height: 42px; cursor: pointer; color: #5b7163; font-size: 14px; line-height: 1.4; }
 .selectControl input { flex-shrink: 0; width: 17px; height: 17px; margin: 0; accent-color: #235a40; cursor: pointer; }
 .selected .selectControl { color: #275c3d; font-weight: 600; }
-.tile h3 { margin: 0 0 8px; color: var(--brand-ink, #143b2e); font-family: inherit; font-size: 23px; font-weight: 550; line-height: 1.3; letter-spacing: -.65px; }
+.titleRow { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.tile h3 { margin: 0; color: var(--brand-ink, #143b2e); font-family: inherit; font-size: 23px; font-weight: 550; line-height: 1.3; letter-spacing: -.65px; }
 .tile .summary { min-height: 50px; margin: 0 0 21px; color: #5d7066; font-size: 16px; line-height: 1.55; }
-.requirements { margin-top: auto; border-top: 1px solid #e2e9e1; }
+.requirements { position: relative; z-index: 2; margin-top: auto; border-top: 1px solid #e2e9e1; }
 .requirements > summary { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 53px; padding: 13px 0; color: #30593e; font-size: 14px; line-height: 1.5; font-weight: 600; list-style: none; cursor: pointer; }
 .expandIcon { flex-shrink: 0; transition: transform .15s; }
 details[open] > summary > .expandIcon { transform: rotate(45deg); }
@@ -50,9 +51,13 @@ details[open] > summary > .expandIcon { transform: rotate(45deg); }
 .requirementsBody ul { margin: 0 0 16px; padding-left: 20px; color: #516654; font-size: 14px; line-height: 1.7; }
 .requirementsBody li + li { margin-top: 5px; }
 .sourceLink { display: inline-block; margin-bottom: 18px; }
-.openSection, .contextButton { display: inline-flex; align-items: center; justify-content: center; min-height: 43px; padding: 10px 14px; border: 1px solid #bdd27e; border-radius: 7px; color: #163b2e; background: #deefa4; font: inherit; font-size: 14px; font-weight: 600; line-height: 1.5; cursor: pointer; }
-.openSection { width: 100%; }
-.openSection:hover, .contextButton:hover { border-color: #a7c365; background: #e8f5b8; }
+.openSection { position: static; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 36px; width: 36px; height: 36px; padding: 0; border: 1px solid #d4dfd6; border-radius: 8px; color: #30593e; background: #f4f8f0; cursor: pointer; }
+.openSection::after { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: 14px; cursor: pointer; }
+.openSection:hover { border-color: #a7c365; background: #e8f5b8; }
+.guide .openSection:focus-visible { outline: none; }
+.openSection:focus-visible::after { outline: 3px solid #26704c; outline-offset: 3px; }
+.contextButton { display: inline-flex; align-items: center; justify-content: center; min-height: 43px; padding: 10px 14px; border: 1px solid #bdd27e; border-radius: 7px; color: #163b2e; background: #deefa4; font: inherit; font-size: 14px; font-weight: 600; line-height: 1.5; cursor: pointer; }
+.contextButton:hover { border-color: #a7c365; background: #e8f5b8; }
 .otherEvidence { margin-top: 25px; border: 1px solid #d9e2d8; border-radius: 12px; background: #f5f8f1; }
 .guide summary:focus-visible { outline: 3px solid #26704c; outline-offset: -3px; border-radius: 5px; }
 .guide :is(a, button, input):focus-visible { outline: 3px solid #26704c; outline-offset: 3px; }

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Banknote, BookOpen, BriefcaseBusiness, Clapperboard, Lightbulb, Newspaper, Palette, Plus, Scale, Trophy, UsersRound, type LucideIcon } from "lucide-react";
+import { Banknote, BookOpen, BriefcaseBusiness, Clapperboard, Lightbulb, Newspaper, Palette, Plus, Scale, SquareArrowOutUpRight, Trophy, UsersRound, type LucideIcon } from "lucide-react";
 import { CRITERIA, GUIDANCE_URL } from "@/lib/model";
 import styles from "./eb1a-guide.module.css";
 
@@ -61,7 +61,7 @@ export function EB1AGuide({ selectedCriteria, onToggle, onOpen, onOpenEvidence, 
       </div>
     </details>
 
-    <div className={styles.sectionHeading}><h2>Find the evidence that tells your story.</h2><p>Choose an area, then explore its requirements.</p></div>
+    <div className={styles.sectionHeading}><h2>Find the evidence that tells your story.</h2><p>Open a card to start preparing, or expand its requirements to learn more.</p></div>
 
     <div className={styles.tiles}>
       {CRITERIA.map(criterion => {
@@ -75,7 +75,10 @@ export function EB1AGuide({ selectedCriteria, onToggle, onOpen, onOpenEvidence, 
               <span>{selected ? "Selected" : "Add to my case"}</span>
             </label>
           </div>
-          <h3 id={`guide-${criterion.id}`}>{item.title}</h3>
+          <div className={styles.titleRow}>
+            <h3 id={`guide-${criterion.id}`}>{item.title}</h3>
+            <button className={styles.openSection} type="button" aria-label={`Open ${item.title}`} title={`Open ${item.title}`} onClick={() => onOpen(criterion.id)}><SquareArrowOutUpRight size={18} aria-hidden="true" /></button>
+          </div>
           <p className={styles.summary}>{item.summary}</p>
           <details className={styles.requirements}>
             <summary aria-label={`See ${item.title} requirements`}><span>See requirements</span><Plus size={17} className={styles.expandIcon} aria-hidden="true" /></summary>
@@ -85,7 +88,6 @@ export function EB1AGuide({ selectedCriteria, onToggle, onOpen, onOpenEvidence, 
               <h4>Evidence you could gather</h4>
               <ul>{criterion.examples.map(example => <li key={example}>{example}</li>)}</ul>
               <a className={styles.sourceLink} href={GUIDANCE_URL} target="_blank" rel="noreferrer">Read the official USCIS guidance</a>
-              <button className={styles.openSection} type="button" onClick={() => onOpen(criterion.id)}>Open {item.title}</button>
             </div>
           </details>
         </article>;
