@@ -1,9 +1,7 @@
 .entry { min-height:100vh; display:flex; flex-direction:column; background:var(--brand-paper,#fafbf7); color:var(--brand-ink,#143b2e); font-family:var(--font-brand-sans,'DM Sans','Segoe UI',sans-serif); font-size:16px; }
 .entry h1,.entry h2 { font-family:inherit; color:var(--brand-ink,#143b2e); }
 .header { width:100%; min-height:77px; padding:16px clamp(22px,4vw,96px); display:flex; align-items:center; justify-content:space-between; gap:24px; background:var(--brand-forest,#082f26); color:#f5f8ec; border-bottom:1px solid #ffffff25; }
-.brand { display:inline-flex; align-items:center; gap:9px; font-size:23px; font-weight:650; letter-spacing:-.75px; white-space:nowrap; }
-.brand svg,.brandDot { color:var(--brand-citrus,#d8ed94); }
-.brand svg { stroke-width:1.6; }
+.brand { display:inline-flex; align-items:center; font-size:23px; white-space:nowrap; }
 .homeLink { display:inline-flex; align-items:center; min-height:44px; color:#e4ece6; font-size:14px; text-decoration:underline; text-underline-offset:5px; }
 .homeLink:hover { color:var(--brand-citrus,#d8ed94); }
 .authLayout { flex:1; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); align-items:stretch; }
@@ -52,7 +50,8 @@
 .whatNext svg { flex-shrink:0; margin-top:2px; }
 .sampleLink { display:flex; align-items:center; justify-content:center; gap:9px; min-height:44px; font-size:15px; font-weight:550; color:var(--brand-ink,#143b2e); }
 .sampleLink:hover { text-decoration:underline; text-underline-offset:4px; }
-.footer { width:100%; padding:20px clamp(22px,4vw,96px); display:flex; justify-content:space-between; gap:15px; border-top:1px solid var(--brand-line,#cbd9d0); color:var(--brand-muted,#52615b); font-size:12px; }
+.footerBrand { --logo-size:18px; }
+.footer { align-items:center; width:100%; padding:20px clamp(22px,4vw,96px); display:flex; justify-content:space-between; gap:15px; border-top:1px solid var(--brand-line,#cbd9d0); color:var(--brand-muted,#52615b); font-size:12px; }
 @media(max-width:1100px) {
   .storyPanel { padding:48px 32px 28px; }
   .authContent { width:calc(100% - 48px); padding:30px 26px; }
@@ -67,7 +66,6 @@
 @media(max-width:480px) {
   .header { padding:12px 20px; min-height:67px; gap:14px; }
   .brand { font-size:21px; gap:7px; }
-  .brand svg { width:24px; }
   .homeLink { font-size:13px; }
   .authContent { width:calc(100% - 32px); margin:28px auto; padding:28px 22px; }
   .cardHeading { align-items:flex-start; flex-direction:column; gap:12px; }

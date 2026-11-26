@@ -10,6 +10,11 @@
 .choose, .apply, .quiet, .close { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 42px; padding: 9px 13px; border: 1px solid var(--brand-line); border-radius: 6px; font: 600 14px/1.4 var(--font-brand-sans); color: var(--brand-ink); background: white; cursor: pointer; max-width: 100%; }
 .choose:hover:not(:disabled) { background: var(--brand-soft); border-color: #75917f; }
 .choose { flex: 0 1 auto; }
+.fileActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.consent { margin-top: 14px; padding: 13px; background: #fff; border: 1px solid var(--brand-line); border-radius: 6px; }
+.consent label { display: flex; gap: 10px; align-items: flex-start; color: var(--brand-muted); font-size: 13px; line-height: 1.6; }
+.consent input { flex: 0 0 auto; width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--brand-forest); }
+.consent button { margin-top: 11px; }
 .importer .fileHelp, .importer .privacy { color: var(--brand-muted); font-size: 12px; line-height: 1.6; margin-top: 10px; }
 .importer .privacy { margin-top: 5px; }
 .progress { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 15px; border-top: 1px solid var(--brand-line); padding-top: 12px; }
@@ -67,7 +72,8 @@
   .importer { padding: 14px; }
   .intro { gap: 10px; }
   .introText { flex-basis: calc(100% - 49px); }
-  .intro > .choose { width: 100%; }
+  .fileActions { width: 100%; }
+  .fileActions > button { flex: 1 1 135px; min-height: 44px; }
   .suggestion, .extracted { padding: 12px; }
   .assignment > label, .assignment > button { flex-basis: 100%; width: 100%; }
   .assignment select { font-size: 16px; }

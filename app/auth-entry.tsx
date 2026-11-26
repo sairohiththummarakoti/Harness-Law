@@ -1,13 +1,14 @@
-import { Check, FolderOpen, Scale, ShieldCheck } from "lucide-react";
+import { Check, FolderOpen, ShieldCheck } from "lucide-react";
 import type { AppUser } from "./auth";
 import GoogleSignIn from "./google-signin";
 import styles from "./entry.module.css";
+import { BrandLogo } from "@/components/brand-logo";
 
 export default function AuthEntry({ user, mode = "signup", googleEnabled = false }: { user: AppUser | null; mode?: "signup" | "signin"; googleEnabled?: boolean }) {
   const signingIn = mode === "signin";
   return <div className={styles.entry}>
     <header className={styles.header}>
-      <a className={styles.brand} href="/" aria-label="Harness Law home"><Scale size={28} /><span>Harness Law<span className={styles.brandDot}>.</span></span></a>
+      <a className={styles.brand} href="/" aria-label="Harness Law home"><BrandLogo inverse /></a>
       <a className={styles.homeLink} href="/">Back to home</a>
     </header>
     <main className={styles.authLayout}>
@@ -36,7 +37,7 @@ export default function AuthEntry({ user, mode = "signup", googleEnabled = false
         <p className={styles.smallNote}>No account needed. All sample people and documents are fictional.</p>
       </section>
     </main>
-    <footer className={styles.footer}><span>Harness Law</span><span>Your story. Your next step.</span></footer>
+    <footer className={styles.footer}><BrandLogo className={styles.footerBrand} /><span>Your story. Your next step.</span></footer>
   </div>;
 }
 

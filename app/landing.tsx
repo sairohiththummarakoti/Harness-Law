@@ -2,8 +2,9 @@
 
 import { useRef, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
-import { BookOpen, Check, ChevronDown, FileText, FolderOpen, LayoutDashboard, Link2, ListChecks, LockKeyhole, Menu, PencilLine, Scale, ShieldCheck, UserRound, X } from "lucide-react";
+import { BookOpen, Check, ChevronDown, FileText, FolderOpen, LayoutDashboard, Link2, ListChecks, LockKeyhole, Menu, PencilLine, ShieldCheck, UserRound, X } from "lucide-react";
 import styles from "./landing.module.css";
+import { BrandLogo } from "@/components/brand-logo";
 
 const stages = [
   { title: "Build profile", headline: "Begin with the work that makes you, you.", body: "Give your preparation a starting point. Bring together your professional field, experience, and the details you’ll review as you build your case.", note: "A short setup. Room for your whole story.", icon: UserRound },
@@ -22,8 +23,8 @@ const questions: { id?: string; q: string; a: string }[] = [
   { q: "Does Harness Law provide legal advice or file my petition?", a: "No. This is a preparation workspace, not legal advice, a determination of eligibility, or an attorney service. Live AI drafting, document extraction, official form assembly, and petition filing are not connected. A qualified immigration attorney can advise you on your individual circumstances." },
 ];
 
-function Brand() {
-  return <Link className={styles.brand} href="/" aria-label="Harness Law home"><span className={styles.brandMark}><Scale size={25} aria-hidden="true" /></span><span>Harness Law<span className={styles.brandDot}>.</span></span></Link>;
+function Brand({ showTagline = false }: { showTagline?: boolean }) {
+  return <Link className={`${styles.brand} ${showTagline ? styles.brandWithTagline : ""}`} href="/" aria-label="Harness Law home" aria-describedby={showTagline ? "launch-brand-tagline" : undefined}><BrandLogo inverse />{showTagline && <span id="launch-brand-tagline" className={styles.brandTagline}>Build with confidence.</span>}</Link>;
 }
 
 function ProductPreview() {
@@ -31,7 +32,7 @@ function ProductPreview() {
     <div className={styles.previewTopline}><span><span className={styles.statusDot} /> A place for the full picture</span><span>Fictional sample workspace</span></div>
     <div className={styles.productWindow} aria-label="Fictional workspace preview for Maya Chen">
       <aside className={styles.productSidebar} aria-hidden="true">
-        <div className={styles.productBrand}><Scale size={21} /> Harness Law</div>
+        <div className={styles.productBrand}><BrandLogo /></div>
         <div className={styles.samplePerson}><span>MC</span><div><strong>Maya Chen</strong><small>Fictional EB-1A case</small></div></div>
         <span className={styles.navCaption}>YOUR WORKSPACE</span>
         <div className={styles.mockNavActive}><LayoutDashboard size={16} /> Overview</div>
@@ -100,9 +101,10 @@ function StagePreview({ stage }: { stage: number }) {
   </div>;
 }
 
-export default function Landing() {
+export default function Landing({ signedIn }: { signedIn: boolean }) {
   const [stage, setStage] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  const workspaceHref = signedIn ? "/workspace" : "/signup";
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const active = stages[stage];
   function handleTabs(event: KeyboardEvent<HTMLButtonElement>, index: number) {
@@ -120,11 +122,11 @@ export default function Landing() {
     <a className={styles.skipLink} href="#main-content">Skip to content</a>
     <header className={styles.cinematicHeader}>
       <div className={styles.cinematicNav}>
-        <Brand />
+        <Brand showTagline />
         <nav className={styles.audienceNav} aria-label="Main navigation"><a href="#individuals">For individuals</a><a href="#businesses">For businesses</a><a href="#attorney-review">Attorneys</a></nav>
-        <div className={styles.cinematicActions}><a className={styles.navResource} href="#how-it-works">Resources</a><a className={styles.navResource} href="#about">About us</a><a className={styles.signInButton} href="/signin">Sign in</a><a className={styles.getStartedButton} href="/signup">Get started</a><button type="button" className={styles.cinematicMenuButton} aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} aria-controls="mobile-navigation" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={22} /> : <Menu size={22} />}</button></div>
+        <div className={styles.cinematicActions}><a className={styles.navResource} href="#how-it-works">Resources</a><a className={styles.navResource} href="#about">About us</a>{!signedIn && <a className={styles.signInButton} href="/signin">Sign in</a>}<a className={styles.getStartedButton} href={workspaceHref}>{signedIn ? "My workspace" : "Get started"}</a><button type="button" className={styles.cinematicMenuButton} aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} aria-controls="mobile-navigation" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={22} /> : <Menu size={22} />}</button></div>
       </div>
-      {menuOpen && <nav className={styles.cinematicMobileNav} id="mobile-navigation" aria-label="Mobile navigation"><a onClick={() => setMenuOpen(false)} href="#individuals">For individuals</a><a onClick={() => setMenuOpen(false)} href="#businesses">For businesses</a><a onClick={() => setMenuOpen(false)} href="#attorney-review">Attorneys</a><a onClick={() => setMenuOpen(false)} href="#how-it-works">Resources</a><a onClick={() => setMenuOpen(false)} href="#about">About us</a><a href="/signin">Sign in</a><a href="/signup">Get started</a></nav>}
+      {menuOpen && <nav className={styles.cinematicMobileNav} id="mobile-navigation" aria-label="Mobile navigation"><a onClick={() => setMenuOpen(false)} href="#individuals">For individuals</a><a onClick={() => setMenuOpen(false)} href="#businesses">For businesses</a><a onClick={() => setMenuOpen(false)} href="#attorney-review">Attorneys</a><a onClick={() => setMenuOpen(false)} href="#how-it-works">Resources</a><a onClick={() => setMenuOpen(false)} href="#about">About us</a>{!signedIn && <a href="/signin">Sign in</a>}<a href={workspaceHref}>{signedIn ? "My workspace" : "Get started"}</a></nav>}
     </header>
     <main id="main-content">
       <section className={styles.cinematicHero} aria-labelledby="hero-title">
@@ -134,7 +136,7 @@ export default function Landing() {
             <p className={styles.heroBadge}>A NEW PERSPECTIVE ON EB-1A PREPARATION</p>
             <h1 id="hero-title">Your talent.<br /><span>A new horizon.</span></h1>
             <p className={styles.heroDescription}>You’ve built a career worth telling. Bring your achievements, evidence, and ambitions together and take a thoughtful next step.</p>
-            <div className={styles.heroLinks}><a className={styles.heroStartButton} href="/signup">Begin your next chapter</a></div>
+            <div className={styles.heroLinks}><a className={styles.heroStartButton} href={workspaceHref}>{signedIn ? "Continue in my workspace" : "Begin your next chapter"}</a></div>
           </div>
         </div>
         <div className={styles.heroFoot}><a href="#individuals">Discover a clearer way to prepare <ChevronDown size={18} aria-hidden="true" /></a><span>YOUR EXPERIENCE. YOUR EVIDENCE. YOUR STORY.</span></div>
@@ -144,7 +146,7 @@ export default function Landing() {
       <section id="how-it-works" className={`${styles.container} ${styles.walkthrough}`} aria-labelledby="walkthrough-title">
         <div className={styles.sectionHeading}><div><p className={styles.eyebrow}>FROM EXPERIENCE TO EVIDENCE</p><h2 id="walkthrough-title">Make your next step<br />a clear one.</h2></div><p>A flexible place to prepare.<br />{' '}Start where you are. Build as you go.</p></div>
         <div className={styles.stageTabs} role="tablist" aria-label="Preparation stages">{stages.map((item, index) => <button key={item.title} ref={el => { tabRefs.current[index] = el; }} id={`stage-tab-${index}`} type="button" role="tab" aria-selected={stage === index} aria-controls="stage-panel" tabIndex={stage === index ? 0 : -1} onKeyDown={event => handleTabs(event, index)} onClick={() => setStage(index)} className={stage === index ? styles.selectedTab : undefined}>{item.title}</button>)}</div>
-        <div id="stage-panel" role="tabpanel" aria-labelledby={`stage-tab-${stage}`} tabIndex={0} className={styles.stagePanel}><div className={styles.stageCopy}><span className={styles.stageIcon}><active.icon size={27} /></span><h3>{active.headline}</h3><p>{active.body}</p><span className={styles.stageNote}>{active.note}</span><a className={styles.textLink} href="/signup">Start your preparation</a></div><StagePreview stage={stage} /></div>
+        <div id="stage-panel" role="tabpanel" aria-labelledby={`stage-tab-${stage}`} tabIndex={0} className={styles.stagePanel}><div className={styles.stageCopy}><span className={styles.stageIcon}><active.icon size={27} /></span><h3>{active.headline}</h3><p>{active.body}</p><span className={styles.stageNote}>{active.note}</span><a className={styles.textLink} href={workspaceHref}>{signedIn ? "Continue your preparation" : "Start your preparation"}</a></div><StagePreview stage={stage} /></div>
       </section>
       <section id="about" className={`${styles.container} ${styles.capabilities}`} aria-labelledby="capabilities-title"><div className={styles.capabilitiesIntro}><p className={styles.eyebrow}>THOUGHTFUL BY DESIGN</p><h2 id="capabilities-title">Your story has details.<br />Keep them connected.</h2><p>A workspace that makes room for the documents, decisions, and revisions behind your preparation.</p><a className={styles.secondaryButton} href="/workspace?sample=1">See it in the sample</a></div><div className={styles.capabilityRows}>
         <article><span className={styles.capabilityIcon}><FolderOpen size={25} /></span><div><h3>A source stays a source</h3><p>Organize documents once and associate them with relevant criteria. Keep the source identity and version visible.</p></div></article>
@@ -152,8 +154,8 @@ export default function Landing() {
         <article><span className={styles.capabilityIcon}><ShieldCheck size={25} /></span><div><h3>Open questions stay visible</h3><p>Track unresolved facts and review needs. A completed step never turns an unverified claim into a confirmed fact.</p></div></article>
       </div></section>
       <section id="faqs" className={`${styles.container} ${styles.faqSection}`} aria-labelledby="faq-title"><div><p className={styles.eyebrow}>A FEW THINGS TO KNOW</p><h2 id="faq-title">A little more<br />{' '}clarity.</h2><p>Before you take the first step.</p></div><div className={styles.faqList}>{questions.map(item => <details key={item.q} id={item.id} className={styles.faq}><summary>{item.q}<ChevronDown size={20} aria-hidden="true" /></summary><p>{item.a}</p></details>)}</div></section>
-      <section className={`${styles.container} ${styles.finalSection}`} aria-labelledby="final-title"><div className={styles.finalCta}><div><p className={styles.eyebrow}>THERE’S A STORY BEHIND YOUR WORK</p><h2 id="final-title">Give your next chapter<br />{' '}a thoughtful beginning.</h2><p>Start with what you know. Bring the rest together.</p></div><div className={styles.finalActions}><a className={styles.primaryButton} href="/signup">Get started</a><span>Your personal EB-1A workspace.</span></div></div></section>
+      <section className={`${styles.container} ${styles.finalSection}`} aria-labelledby="final-title"><div className={styles.finalCta}><div><p className={styles.eyebrow}>THERE’S A STORY BEHIND YOUR WORK</p><h2 id="final-title">Give your next chapter<br />{' '}a thoughtful beginning.</h2><p>Start with what you know. Bring the rest together.</p></div><div className={styles.finalActions}><a className={styles.primaryButton} href={workspaceHref}>{signedIn ? "My workspace" : "Get started"}</a><span>Your personal EB-1A workspace.</span></div></div></section>
     </main>
-    <footer className={`${styles.container} ${styles.footer}`}><div className={styles.footerTop}><Brand /><nav aria-label="Footer navigation"><a href="#how-it-works">How it works</a><a href="/workspace?sample=1">Sample workspace</a><a href="/signin">Log in</a></nav></div><div className={styles.footerBottom}><span>© {new Date().getFullYear()} Harness Law</span><p>A preparation workspace. Not legal advice, an eligibility decision, or a filing service.</p></div></footer>
+    <footer className={`${styles.container} ${styles.footer}`}><div className={styles.footerTop}><Brand /><nav aria-label="Footer navigation"><a href="#how-it-works">How it works</a><a href="/workspace?sample=1">Sample workspace</a><a href={signedIn ? "/workspace" : "/signin"}>{signedIn ? "My workspace" : "Log in"}</a></nav></div><div className={styles.footerBottom}><span>© {new Date().getFullYear()} Harness Law</span><p>A preparation workspace. Not legal advice, an eligibility decision, or a filing service.</p></div></footer>
   </div>;
 }

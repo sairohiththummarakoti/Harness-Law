@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { Check, CheckCircle2, ChevronDown, Loader2, Scale, Search, ShieldCheck, X } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, Loader2, Search, ShieldCheck, X } from "lucide-react";
 import { CRITERIA, GUIDANCE_URL, type CaseState } from "@/lib/model";
 import { applyIntakeStep, getIntakeSteps, intakeAnswersFromCase, mergeIntakeStepAnswers, INTAKE_STEP_FIELDS, type IntakeAnswers, type IntakeStep } from "@/lib/intake";
 import { INTAKE_STEP_LABELS, VISA_OPTIONS } from "@/lib/intake-catalog";
@@ -10,6 +10,9 @@ import { requestCase } from "@/lib/case-request";
 import { FileFormImport } from "@/components/file-form-import";
 import { applyIntakeImportPatch, intakeImportFields } from "@/lib/form-import-fields";
 import styles from "./setup.module.css";
+import { BrandLogo } from "@/components/brand-logo";
+import { EvidenceLibraryProvider } from "@/components/evidence-library-context";
+import { EvidenceRequestError, uploadEvidenceFile, readEvidenceFile } from "@/lib/evidence-client";
 
 type Choice = { value: string; label: string; description?: string };
 const blankAnswers: IntakeAnswers = { fullName: "", phone: "", helpFor: "", visaType: "", birthCountry: "", birthCountryOther: "", citizenships: [], field: "", role: "", criteria: [], criteriaUnsure: false, majorAward: "", notes: "" };
@@ -89,6 +92,8 @@ export default function Onboarding({ initialName, initialEmail, signInPath, acco
   const [conflictNeedsLoad, setConflictNeedsLoad] = useState(false);
   const [completed, setCompleted] = useState(false);
   const saveInFlight = useRef(false);
+  const caseRef = useRef(caseState);
+  caseRef.current = caseState;
   const heading = useRef<HTMLHeadingElement>(null);
   const savedAnswers = useRef<IntakeAnswers | null>(null);
   const currentAnswers = useRef(answers);
@@ -202,6 +207,61 @@ export default function Onboarding({ initialName, initialEmail, signInPath, acco
     finally { saveInFlight.current = false; setSaving(false); }
   }
 
+  function recordEvidenceError(cause: unknown) {
+    if (cause instanceof EvidenceRequestError) {
+      if (cause.status === 401) setSessionExpired(true);
+      if (cause.status === 409) {
+        if (cause.state && cause.revision !== undefined) setConflict({ ...cause.state, revision: cause.revision });
+        else setConflictNeedsLoad(true);
+      }
+    }
+    setError(cause instanceof Error ? cause.message : "Your file could not be saved. Please retry.");
+  }
+  async function recheckSession() {
+    if (saveInFlight.current) return;
+    saveInFlight.current = true; setSaving(true);
+    try {
+      const response = await requestCase({ headers: { "X-Harness-Account": accountId } });
+      const result = response.data;
+      if (!response.ok || !result.state || result.revision === undefined) throw new EvidenceRequestError(result.error || "Sign in to the same account, then check again.", response.status);
+      setSessionExpired(false);
+      if (result.state.id !== caseRef.current?.id || result.revision !== caseRef.current.revision) {
+        setConflict({ ...result.state, revision: result.revision });
+        setError("Your saved case changed. Compare it below; your draft answers are still here.");
+      } else setError("");
+    } catch (cause) { recordEvidenceError(cause); }
+    finally { saveInFlight.current = false; setSaving(false); }
+  }
+  async function grantFileConsent() {
+    const base = caseRef.current;
+    if (!base || saveInFlight.current || conflict || conflictNeedsLoad || sessionExpired) throw new Error("Resolve the current save or session message before continuing.");
+    if (base.consent) return;
+    saveInFlight.current = true; setSaving(true); setError("");
+    try {
+      const response = await requestCase({ method: "PUT", headers: { "Content-Type": "application/json", "X-Harness-Account": accountId }, body: JSON.stringify({ state: { ...base, consent: true }, expectedRevision: base.revision }) });
+      const result = response.data;
+      if (!response.ok || !result.state || result.revision === undefined) throw new EvidenceRequestError(result.error || "Consent could not be saved. Please retry.", response.status, result.state, result.revision);
+      const accepted = { ...result.state, revision: result.revision };
+      caseRef.current = accepted; setCaseState(accepted);
+    } catch (cause) { recordEvidenceError(cause); throw cause; }
+    finally { saveInFlight.current = false; setSaving(false); }
+  }
+  async function retainIntakeFile(file: File, signal?: AbortSignal) {
+    if (signal?.aborted) throw new DOMException("Canceled", "AbortError");
+    const base = caseRef.current;
+    if (!base || saveInFlight.current || conflict || conflictNeedsLoad || sessionExpired) throw new Error("Resolve the current save or session message before uploading.");
+    if (!base.consent) throw new Error("Save file storage consent before uploading.");
+    saveInFlight.current = true; setSaving(true); setError("");
+    try {
+      const result = await uploadEvidenceFile(file, accountId, base);
+      if (caseRef.current?.id !== base.id) throw new Error("Your case changed. This upload stays with its original case.");
+      caseRef.current = result.state; setCaseState(result.state);
+      // Preserve unsaved answers and the current intake step.
+      return result.state.documents.find(document => document.objectId === result.document.objectId) ?? result.document;
+    } catch (cause) { recordEvidenceError(cause); throw cause; }
+    finally { saveInFlight.current = false; setSaving(false); }
+  }
+
   const sequence = getIntakeSteps(answers.visaType);
   const position = Math.max(sequence.indexOf(step), 0);
   const blocked = saving || !!conflict || conflictNeedsLoad;
@@ -214,12 +274,20 @@ export default function Onboarding({ initialName, initialEmail, signInPath, acco
   const selectedCriteria = CRITERIA.filter(criterion => answers.criteria.includes(criterion.id));
   const isEB1A = answers.visaType === "eb1a";
 
-  return <div className={styles.setup}>
+  return <EvidenceLibraryProvider value={{ documents: caseState?.documents ?? [], folders: caseState?.folders ?? [], mode: "personal", caseId: caseState?.id ?? "loading", accountId, consent: !!caseState?.consent, disabled: loading || blocked || sessionExpired, upload: retainIntakeFile, read: (document, signal) => readEvidenceFile(document, accountId, caseState?.id ?? "", signal), grantConsent: grantFileConsent }}><div className={styles.setup}>
+    <a className={styles.skipLink} href="#intake-form">Skip to intake</a>
     <header className={styles.header}>
-      <a className={styles.brand} href="/" aria-label="Harness Law home"><Scale size={27} /><span>Harness Law<span className={styles.brandDot}>.</span></span></a>
-      <span className={styles.headerNote}><ShieldCheck size={17} /><span>Your private intake</span></span>
+      <a className={styles.brand} href="/" aria-label="Harness Law home"><BrandLogo inverse /></a>
+      <span className={styles.headerNote}><ShieldCheck size={17} aria-hidden="true" /><span>Private intake</span></span>
     </header>
     <main className={styles.main}>
+      <aside className={styles.journey} aria-label="Your intake journey">
+        <img className={styles.journeyArtwork} src="/images/harness-horizon.webp" alt="" width="1254" height="1254" />
+        <div className={styles.journeyIntro}><p className={styles.journeyEyebrow}>YOUR NEXT CHAPTER</p><h2>Your story.<span>A clearer path.</span></h2><p>A few thoughtful questions. One place to bring your plans together.</p></div>
+        <ol className={styles.journeySteps} aria-label="Intake steps">{sequence.map((item, index) => <li key={item} className={!completed && item === step ? styles.currentStep : completed || index < position ? styles.previousStep : undefined} aria-current={!completed && item === step ? "step" : undefined}><span className={styles.stepMarker} aria-hidden="true">{completed || index < position ? <Check size={14} /> : index + 1}</span><span>{INTAKE_STEP_LABELS[item]}</span>{!completed && item === step && <span className={styles.srOnly}>, current step</span>}</li>)}</ol>
+        <p className={styles.journeyNote}><ShieldCheck size={18} aria-hidden="true" /><span>Your answers stay in your account.<br />Save each step and return when you’re ready.</span></p>
+      </aside>
+      <div className={styles.content} id="intake-form" tabIndex={-1}><div className={styles.contentInner}>
       <div className={styles.progressHeader}><span>{completed ? "YOUR INTAKE" : "LET’S GET TO KNOW YOU"}</span><span>{completed ? "Answers saved" : `Step ${position + 1} of ${sequence.length}`}</span></div>
       <div className={styles.progressTrack} role="progressbar" aria-label="Intake progress" aria-valuemin={0} aria-valuemax={sequence.length} aria-valuenow={completed ? sequence.length : position + 1} aria-valuetext={completed ? "Intake complete" : `Step ${position + 1} of ${sequence.length}: ${INTAKE_STEP_LABELS[step]}`}><span style={{ width: `${completed ? 100 : ((position + 1) / sequence.length) * 100}%` }} /></div>
 
@@ -266,7 +334,7 @@ export default function Onboarding({ initialName, initialEmail, signInPath, acco
             <p className={styles.factNote}><ShieldCheck size={18} /><span>Your answers personalize your preparation. Case facts and evidence still need review.</span></p>
           </>}
         </fieldset>
-        {error && <div className={styles.error} role="alert"><p>{error}</p>{sessionExpired && <><a href={signInPath} target="_blank" rel="noopener noreferrer">Sign in again (new tab)</a><p>Then return here and retry. Use the same account and sign-in method.</p></>}{conflictNeedsLoad && <button type="button" disabled={saving} onClick={() => void loadLatestForComparison()}>Load latest saved answers</button>}</div>}
+        {error && <div className={styles.error} role="alert"><p>{error}</p>{sessionExpired && <><a href={signInPath} target="_blank" rel="noopener noreferrer">Sign in again (new tab)</a><p>Then return here. Use the same account and sign-in method.</p><button type="button" disabled={saving} onClick={() => void recheckSession()}>Check sign-in</button></>}{conflictNeedsLoad && <button type="button" disabled={saving} onClick={() => void loadLatestForComparison()}>Load latest saved answers</button>}</div>}
         {conflict && <section className={styles.conflict} aria-label="Compare saved intake"><h2>Latest saved answers</h2><dl>{summaryRows(answersFromCase(conflict)).map(row => <div key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl><p>{!conflictCanRetry ? "The saved visa choice or intake progress changed. Continue from the saved answers to answer the questions in the updated flow. Your draft remains above for you to copy before replacing it." : step === "review" ? "Finishing uses the saved answers above and the additional context you entered. Use saved answers to review them first, or finish with those answers." : "Your draft remains above. Retry saves only this question onto the latest case. Use saved answers replaces this window’s draft with the latest saved intake."}</p><div className={styles.conflictActions}><button type="button" className={styles.secondary} disabled={saving} onClick={() => { adoptSaved(conflict); setError(""); }}>Use saved answers</button>{conflictCanRetry && <button type="button" className={styles.primary} disabled={saving} onClick={() => void saveStep(undefined, conflict)}>{step === "review" ? "Finish with saved answers" : "Keep this answer and retry"}</button>}</div></section>}
         <div className={styles.actions}><button type="button" className={styles.back} disabled={blocked || position === 0} onClick={() => editStep(sequence[position - 1])}>Back</button><button type="submit" className={styles.primary} disabled={blocked}>{saving ? <><Loader2 className={styles.spinner} size={17} />Saving…</> : step === "review" ? "Finish my intake" : "Continue"}</button></div>
         <p className={styles.saveNote}>Your answers save when you continue.</p>
@@ -280,7 +348,8 @@ export default function Onboarding({ initialName, initialEmail, signInPath, acco
         <div className={styles.completionActions}>{isEB1A ? <a className={styles.primary} href="/workspace">Open my EB-1A workspace</a> : <a className={styles.primary} href="/">Back to Harness Law</a>}<button className={styles.secondary} type="button" onClick={() => editStep("basics")}>Update my answers</button></div>
         {!isEB1A && <a className={styles.quietLink} href="/workspace?sample=1">Explore the fictional EB-1A sample</a>}
       </section>}
+      </div></div>
     </main>
-    <footer className={styles.footer}>A thoughtful first step toward your next chapter.</footer>
-  </div>;
+    <footer className={styles.footer}><BrandLogo inverse className={styles.footerBrand} /><span>A thoughtful first step toward your next chapter.</span></footer>
+  </div></EvidenceLibraryProvider>;
 }

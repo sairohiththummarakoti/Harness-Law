@@ -1,0 +1,22 @@
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: .55em;
+  color: var(--brand-forest, #082f26);
+  font-family: var(--font-brand-sans, 'DM Sans', 'Segoe UI', sans-serif);
+  font-size: var(--logo-size, inherit);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -.035em;
+  white-space: nowrap;
+}
+.mark {
+  display: block;
+  width: 1.35em;
+  height: 1.35em;
+  flex: 0 0 auto;
+  color: inherit;
+}
+.wordmark { display: block; }
+.inverse { color: #f4f6ea; }
+.inverse .mark { color: var(--brand-citrus, #d8ed94); }

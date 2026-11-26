@@ -19,11 +19,10 @@
 .container {width:100%;max-width:none;padding-left:var(--page-gutter);padding-right:var(--page-gutter);margin:0}
 .skipLink {position:absolute;left:20px;top:-80px;z-index:99;padding:12px 20px;background:#143b2e;color:#fff;border-radius:4px}
 .skipLink:focus {top:10px}
-.brand {display:inline-flex;align-items:center;gap:9px;font-size:23px;font-weight:650;letter-spacing:-.75px;white-space:nowrap;line-height:1.2}
-.brandMark {display:grid;place-items:center;width:32px;height:34px;color:var(--landing-green)}
-.brandDot {color:#26875e}
+.brand {display:inline-flex;align-items:center;font-size:23px;white-space:nowrap;line-height:1.2}
+.brandWithTagline {flex-direction:column;align-items:flex-start;gap:3px}
+.brandTagline {font-size:12px;line-height:15px;font-weight:400;letter-spacing:.2px;color:var(--landing-citrus)}
 .cinematicHeader {position:relative;z-index:10;border-bottom:1px solid #ffffff20;background:#082f26;color:#f5f8ec}
-.cinematicHeader .brandMark,.cinematicHeader .brandDot {color:var(--landing-citrus)}
 .cinematicNav {display:flex;align-items:center;gap:36px;min-height:76px;padding:12px var(--page-gutter);width:100%}
 .audienceNav {display:flex;align-items:center;gap:28px;margin-left:auto;font-size:14px;white-space:nowrap}
 .cinematicActions {display:flex;align-items:center;gap:22px;font-size:14px;white-space:nowrap}
@@ -77,8 +76,7 @@
 .statusDot {display:none}
 .productWindow {display:grid;grid-template-columns:150px minmax(0,1fr);border:1px solid #d6e2da;border-radius:8px;background:#fff;box-shadow:0 12px 36px #143b2e09;overflow:hidden;min-width:0}
 .productSidebar {display:flex;flex-direction:column;background:#f6f9f7;border-right:1px solid #e0e8e2;padding:18px 12px;min-width:0}
-.productBrand {display:flex;align-items:center;gap:5px;font-size:14px;font-weight:600;letter-spacing:-.3px;margin-bottom:20px;white-space:nowrap}
-.productBrand svg {width:18px;flex-shrink:0}
+.productBrand {display:flex;align-items:center;font-size:14px;margin-bottom:20px;white-space:nowrap}
 .samplePerson {display:flex;align-items:center;gap:7px;padding:10px 0;margin-bottom:18px}
 .samplePerson>span {display:grid;place-items:center;flex-shrink:0;width:30px;height:32px;border-radius:4px;background:#e3ede5;color:#31593e;font-size:12px}
 .samplePerson strong {display:block;font-size:12px;font-weight:600}
@@ -213,7 +211,6 @@
 .finalActions .primaryButton:hover {background:#216246}
 .finalActions>span {font-size:13px;color:#426235}
 .footer {padding-top:40px;padding-bottom:30px;background:#082f26;color:#f5f8ec}
-.footer .brandMark,.footer .brandDot {color:var(--landing-citrus)}
 .footer a:hover {color:var(--landing-citrus)}
 .footerTop {display:flex;align-items:center;justify-content:space-between;gap:24px}
 .footerTop nav {display:flex;gap:28px;flex-wrap:wrap;font-size:14px;color:#d1ded4}
@@ -236,7 +233,7 @@
 }
 @media(max-width:900px) {
   .landing {--hero-header-height:69px}
-  .cinematicNav {min-height:68px;padding-top:10px;padding-bottom:10px}
+  .cinematicNav {min-height:68px;padding-top:9px;padding-bottom:9px}
   .cinematicContent {padding-top:56px;padding-bottom:50px}.heroCopy {width:85%}
   .heroArtwork {width:80%;right:-18%;opacity:.6}
   .heroDescription {max-width:390px}.heroFoot>span {display:none}

@@ -5,8 +5,8 @@ export const metadata: Metadata = {
   title: "Harness Law — Your applicant workspace",
   description: "Bring your evidence, your story, and your application together in one thoughtful workspace.",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: "/favicon.svg?v=softened-h",
+    shortcut: "/favicon.svg?v=softened-h",
   },
 };
 

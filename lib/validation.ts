@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { folderIntegrityError, MAX_EVIDENCE_FOLDERS, MAX_FOLDER_NAME } from './evidence-folders.ts';
 import { getIntakeSteps, intakeCompletionError, intakeStepError } from './intake.ts';
 import { VISA_IDS, type VisaType } from './intake-catalog.ts';
 import { isBirthCountryCode, isCitizenshipCode } from './countries.ts';
@@ -47,23 +48,25 @@ export const intakeSchema=z.object({
     const error=intakeCompletionError(answers);if(error)issue(error);
   }
 });
-export const evidenceSchema=z.object({id,name:short,version:revision,status:processing,language:short,pages:z.number().int().min(0).max(10000),bytes:z.number().int().min(0).max(20*1024*1024),kind:short,excerpt:text,associations:z.array(z.object({criterion,status:z.enum(['proposed','confirmed','removed']),actor:short,revision}).strict()).max(10),exhibit:short,uploadedAt:timestamp,sample:z.boolean(),objectId:id.optional(),issue:short.optional(),previousVersions:z.array(z.object({version:revision,name:short,excerpt:text,status:processing,at:timestamp}).strict()).max(100).optional()}).strict();
+export const evidenceSchema=z.object({id,folderId:id.nullable().optional(),name:short,version:revision,status:processing,language:short,pages:z.number().int().min(0).max(10000),bytes:z.number().int().min(0).max(20*1024*1024),kind:short,excerpt:text,associations:z.array(z.object({criterion,status:z.enum(['proposed','confirmed','removed']),actor:short,revision}).strict()).max(10),exhibit:short,uploadedAt:timestamp,sample:z.boolean(),objectId:id.optional(),issue:short.optional(),previousVersions:z.array(z.object({version:revision,name:short,excerpt:text,status:processing,at:timestamp}).strict()).max(100).optional()}).strict();
 export const caseSchema=z.object({
   id,name:short,mode:z.enum(['sample','personal']),revision,
   profile:z.object({fullName:short,preferredName:short,email:short,phone:short,country:short,address:text,priorNames:text,confirmed:z.boolean()}).strict(),
   professional:z.object({field:short,role:short,organization:short,timeline:text,achievements:text,intendedWork:text}).strict(),
-  criteria:z.array(criterion).max(10),documents:z.array(evidenceSchema).max(200),
+  criteria:z.array(criterion).max(10),documents:z.array(evidenceSchema).max(200),folders:z.array(z.object({id,name:z.string().min(1).max(MAX_FOLDER_NAME),parentId:id.nullable()}).strict()).max(MAX_EVIDENCE_FOLDERS).optional(),
   facts:z.array(z.object({id,label:short,value:text,originalValue:text,sourceId:id,page:z.number().int().min(1).max(10000),status:z.enum(['unresolved','confirmed','corrected','issue']),reason:text}).strict()).max(1000),
   runs:z.record(criterion,z.object({criterion,generation:revision,status:z.enum(['idle','queued','running','succeeded','failed','canceled']),stage:short,error:text.optional(),questions:z.array(text).max(100),result:result.nullable(),history:z.array(result).max(100)}).strict()),
   composition:composition.nullable(),compositionHistory:z.array(composition).max(500).optional(),
   forms:z.object({fullName:short,address:text,country:short,intendedWork:text,reviewed:z.boolean(),templateStatus:z.enum(['unverified','current'])}).strict(),
   activities:z.array(z.object({id,title:short,detail:text,at:timestamp}).strict()).max(100),consent:z.boolean(),lastPage:short,updatedAt:timestamp,
   onboarding:onboarding.optional(),intake:intakeSchema.optional(),
-}).strict();
+}).strict().superRefine((value,context)=>{
+  const error=folderIntegrityError(value);if(error)context.addIssue({code:z.ZodIssueCode.custom,message:error,path:['folders']});
+});
 export const saveSchema=z.object({state:caseSchema,expectedRevision:revision}).strict();
 export const MAX_CASE_BODY=1024*1024;
 export const MAX_FILE_BYTES=20*1024*1024;
-export function validUploadName(name:string):boolean{return /\.(pdf|docx|txt|jpe?g|png)$/i.test(name)&&name.length>0&&name.length<=250&&!/[\x00-\x1F]/.test(name);}
+export function validUploadName(name:string):boolean{return /\.(pdf|docx|txt|md|markdown|csv|json|jpe?g|png)$/i.test(name)&&name.length>0&&name.length<=250&&!/[\x00-\x1F]/.test(name);}
 export function safeFilename(name:string):string{return name.replace(/^.*[\\/]/,'').replace(/[\x00-\x1F]/g,'').slice(0,250);}
 export async function readLimitedBody(request:Request,limit:number):Promise<Uint8Array|null>{
   if(!request.body)return new Uint8Array();

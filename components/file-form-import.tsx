@@ -1,12 +1,17 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ChangeEvent, type DragEvent } from "react";
-import { Check, FileText, Loader2, Upload, X } from "lucide-react";
+import { Check, FileText, FolderOpen, Loader2, Upload, X } from "lucide-react";
 import { buildImportPatch, suggestImportFields, validateImportValue, type ImportField, type ImportSuggestion, type ImportValue } from "@/lib/form-import";
 import { extractImportFile } from "@/lib/form-import-extract";
+import { importFormat } from "@/lib/form-import-limits";
+import type { Evidence } from "@/lib/model";
+import { useEvidenceLibrary } from "./evidence-library-context";
+import { EvidencePicker } from "./evidence-picker";
 import styles from "./file-form-import.module.css";
 
 type ImportValues = Record<string, unknown>;
+type ImportSource = { file?: File; document?: Evidence };
 type Review = { fileName: string; text: string; suggestions: ImportSuggestion[]; baseline: ImportValues; context: string; manualOnlyReason?: string };
 export type FileFormImportProps = {
   fields: ImportField[];
@@ -27,18 +32,26 @@ function displayValue(field: ImportField, value: unknown): string {
   return field.options?.find(option => option.value === value)?.label ?? String(value);
 }
 
-/** Files and extracted text stay in this mounted component. Only the reviewed patch leaves it. */
+/** Originals are retained in Evidence; extracted text stays local and only reviewed answers fill the form. */
 export function FileFormImport({ fields, values, onApply, disabled = false, contextKey, label = "Fill from a document", saveNote = "Review the filled answers, then use this form’s usual save action." }: FileFormImportProps) {
   const id = useId();
+  const library = useEvidenceLibrary();
+  const activeContext = JSON.stringify([contextKey, library?.accountId ?? null, library?.caseId ?? null]);
+  const actionsDisabled = disabled || !!library?.disabled;
+  const canUpload = !!library && library.mode === "personal" && !!library.accountId;
+  const [browseOpen, setBrowseOpen] = useState(false);
+  const [consentChecked, setConsentChecked] = useState(false);
+  const [consentBusy, setConsentBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const chooseButton = useRef<HTMLButtonElement>(null);
+  const browseButton = useRef<HTMLButtonElement>(null);
   const importHeading = useRef<HTMLHeadingElement>(null);
   const reviewHeading = useRef<HTMLHeadingElement>(null);
   const controller = useRef<AbortController | null>(null);
   const generation = useRef(0);
-  const latest = useRef({ fields, values, disabled, contextKey, onApply });
-  latest.current = { fields, values, disabled, contextKey, onApply };
-  const lastFile = useRef<File | null>(null);
+  const latest = useRef({ fields, values, disabled: actionsDisabled, contextKey: activeContext, onApply, library });
+  latest.current = { fields, values, disabled: actionsDisabled, contextKey: activeContext, onApply, library };
+  const lastSource = useRef<ImportSource | null>(null);
   const [review, setReview] = useState<Review | null>(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
@@ -48,18 +61,18 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
   const [assignment, setAssignment] = useState("");
   const [selectedText, setSelectedText] = useState("");
   const [showText, setShowText] = useState(false);
-  const activeReview = !disabled && review?.context === contextKey ? review : null;
+  const activeReview = review?.context === activeContext ? review : null;
 
   useEffect(() => {
     generation.current += 1;
     controller.current?.abort();
     controller.current = null;
-    lastFile.current = null;
+    lastSource.current = null;
     setBusy(false); setProgress(""); setReview(null); setError(""); setNotice("");
-    setAssignment(""); setSelectedText(""); setShowText(false); setDragging(false);
+    setAssignment(""); setSelectedText(""); setShowText(false); setDragging(false); setBrowseOpen(false); setConsentChecked(false); setConsentBusy(false);
     if (fileInput.current) fileInput.current.value = "";
     return () => { generation.current += 1; controller.current?.abort(); };
-  }, [contextKey, disabled]);
+  }, [activeContext]);
 
   function returnFocus() {
     const context = latest.current.contextKey;
@@ -73,43 +86,87 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
 
   function cancel() {
     generation.current += 1;
-    controller.current?.abort(); controller.current = null; lastFile.current = null;
+    controller.current?.abort(); controller.current = null; lastSource.current = null;
     setBusy(false); setProgress(""); setReview(null); setError("");
-    setNotice("Import canceled. Your form answers have not changed.");
+    setNotice("Import canceled. Your form answers have not changed. Any file already saved remains in Evidence.");
     setSelectedText(""); setAssignment("");
     if (fileInput.current) fileInput.current.value = "";
     returnFocus();
   }
 
-  async function choose(file: File) {
-    if (latest.current.disabled) return;
+  function closeBrowser() {
+    setBrowseOpen(false);
+    requestAnimationFrame(() => browseButton.current?.focus());
+  }
+
+  async function saveConsent() {
+    const current = latest.current;
+    if (!current.library || current.disabled || !consentChecked || consentBusy) return;
+    const context = current.contextKey;
+    setConsentBusy(true); setError("");
+    try {
+      await current.library.grantConsent();
+      if (latest.current.contextKey === context) setNotice("Consent saved. You can upload a file to Evidence and review its suggested answers.");
+    } catch (cause) {
+      if (latest.current.contextKey === context) setError(cause instanceof Error ? cause.message : "Consent could not be saved. Please retry.");
+    } finally { if (latest.current.contextKey === context) setConsentBusy(false); }
+  }
+
+  async function choose(source: ImportSource) {
+    const current = latest.current;
+    if (current.disabled || !current.library) return;
+    if (!source.document && (current.library.mode !== "personal" || !current.library.accountId)) {
+      setError("Open a signed-in personal case to upload your files. You can browse fictional sample documents here."); return;
+    }
+    if (!source.document && !current.library.consent) {
+      setError("Save your storage consent below before uploading a file."); return;
+    }
     controller.current?.abort();
     const request = ++generation.current;
-    const context = latest.current.contextKey;
+    const context = current.contextKey;
     const abort = new AbortController(); controller.current = abort;
-    lastFile.current = file;
-    setReview(null); setError(""); setNotice(""); setBusy(true); setProgress("Reading your document locally…");
+    lastSource.current = source;
+    setBrowseOpen(false);
+    setReview(null); setError(""); setNotice(""); setBusy(true);
+    setProgress(source.document ? "Opening your saved document…" : "Saving your file to Evidence…");
     setAssignment(""); setSelectedText(""); setShowText(false); setDragging(false);
+    const isCurrent = () => !abort.signal.aborted && request === generation.current && latest.current.contextKey === context;
     try {
+      let file = source.file;
+      if (!source.document) {
+        if (!file) throw new Error("Choose a document to upload.");
+        // Reject unsupported selections before storage; parsing happens only after retention.
+        importFormat(file.name, file.size);
+        source.document = await current.library.upload(file, abort.signal);
+        if (!isCurrent()) return;
+      } else if (!file) {
+        file = await current.library.read(source.document, abort.signal);
+        if (!isCurrent()) return;
+      }
+      if (!file) throw new Error("The original file is unavailable. Choose another document.");
+      if (!isCurrent()) return;
+      setProgress("Reading your document locally…");
       const result = await extractImportFile(file, { signal: abort.signal, onProgress: (message: string) => {
-        if (request === generation.current && !abort.signal.aborted) setProgress(message);
+        if (isCurrent()) setProgress(message);
       } });
-      if (abort.signal.aborted || request !== generation.current || latest.current.disabled || latest.current.contextKey !== context) return;
+      if (!isCurrent()) return;
       if (!result.text.trim()) {
         setError("No readable text was found. Try a document containing selectable text. Scans and images need OCR first.");
+        setNotice("Your file remains in Evidence. No form answers have changed.");
         return;
       }
-      const current = latest.current;
-      const suggestions = result.manualOnly ? [] : suggestImportFields(result.text, current.fields, current.values);
+      const latestValues = latest.current;
+      const suggestions = result.manualOnly ? [] : suggestImportFields(result.text, latestValues.fields, latestValues.values);
       const manualOnlyReason = result.manualOnly ? result.manualOnlyReason || "This document needs manual field assignment." : undefined;
-      setReview({ fileName: result.fileName, text: result.text, suggestions, baseline: structuredClone(current.values), context, manualOnlyReason });
+      setReview({ fileName: source.document?.name || result.fileName, text: result.text, suggestions, baseline: structuredClone(latestValues.values), context, manualOnlyReason });
       setShowText(suggestions.length === 0);
-      setNotice(suggestions.length ? "Review each suggestion before filling this form." : manualOnlyReason ? "Read the document text and assign the relevant passages to fields below." : "No reliable field matches were found. Choose text and assign it to a field below.");
-      // The next animation frame follows the committed review markup.
-      requestAnimationFrame(() => { if (request === generation.current) reviewHeading.current?.focus(); });
+      const stored = source.document?.sample ? "Fictional sample document. " : "Saved in Evidence. ";
+      setNotice(stored + (suggestions.length ? "Review each suggestion before filling this form." : manualOnlyReason ? "Read the document text and assign the relevant passages to fields below." : "No reliable field matches were found. Choose text and assign it to a field below."));
+      requestAnimationFrame(() => { if (isCurrent()) reviewHeading.current?.focus(); });
     } catch (cause) {
-      if (abort.signal.aborted || request !== generation.current) return;
+      if (!isCurrent()) return;
       setError(cause instanceof Error ? cause.message : "We couldn’t read this document. Try another supported file.");
+      if (source.document && !source.document.sample) setNotice("Your file remains in Evidence. No form answers have changed.");
     } finally {
       if (request === generation.current) { controller.current = null; setBusy(false); setProgress(""); }
     }
@@ -118,17 +175,17 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
   function chooseInput(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = "";
-    if (file) void choose(file);
+    if (file) void choose({ file });
   }
 
   function drop(event: DragEvent<HTMLElement>) {
     event.preventDefault(); setDragging(false);
-    if (disabled) return;
+    if (actionsDisabled || busy) return;
     if (event.dataTransfer.files.length !== 1) {
       setError("Choose one document at a time."); return;
     }
     const file = event.dataTransfer.files[0];
-    if (file) void choose(file);
+    if (file) void choose({ file });
   }
 
   function updateSuggestion(key: string, value: ImportValue) {
@@ -182,7 +239,7 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
     const count = Object.keys(result.patch).length;
     if (!count) { setNotice("Select at least one field to fill."); return; }
     current.onApply(result.patch);
-    setReview(null); lastFile.current = null; setSelectedText(""); setAssignment(""); setError("");
+    setReview(null); lastSource.current = null; setSelectedText(""); setAssignment(""); setError("");
     setNotice(`Filled ${count} ${count === 1 ? "field" : "fields"} in this form. ${saveNote}`);
     returnFocus();
   }
@@ -192,7 +249,7 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
     const helpId = `${id}-help-${field.key}`;
     const errorId = `${id}-error-${field.key}`;
     const describedBy = [helpId, suggestion.error ? errorId : ""].filter(Boolean).join(" ");
-    const common = { id: inputId, className: styles.editor, disabled, "aria-invalid": !!suggestion.error, "aria-describedby": describedBy };
+    const common = { id: inputId, className: styles.editor, disabled: actionsDisabled, "aria-invalid": !!suggestion.error, "aria-describedby": describedBy };
     if (field.kind === "choice") {
       const value = typeof suggestion.value === "string" ? suggestion.value : String(suggestion.value);
       const unrecognized = value && !field.options?.some(option => option.value === value);
@@ -223,20 +280,29 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
   const selectedCount = activeReview?.suggestions.filter(suggestion => suggestion.selected).length ?? 0;
   const assignable = fields.filter(field => !activeReview?.suggestions.some(suggestion => suggestion.key === field.key));
   return <section className={`${styles.importer} ${dragging ? styles.dragging : ""}`} aria-labelledby={`${id}-title`}
-    onDragOver={event => { event.preventDefault(); if (!disabled) setDragging(true); }}
+    onDragOver={event => { event.preventDefault(); if (!actionsDisabled && !busy && canUpload && library?.consent) setDragging(true); }}
     onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }} onDrop={drop}>
     <div className={styles.intro}>
       <span className={styles.icon}><FileText size={21} aria-hidden="true" /></span>
-      <div className={styles.introText}><h3 ref={importHeading} id={`${id}-title`} tabIndex={-1}>{label}</h3><p>Choose a document to review suggestions for the fields in this form.</p></div>
-      <button ref={chooseButton} type="button" className={styles.choose} disabled={disabled} onClick={() => fileInput.current?.click()}><Upload size={16} aria-hidden="true" />{busy || activeReview ? "Choose another file" : "Choose a file"}</button>
+      <div className={styles.introText}><h3 ref={importHeading} id={`${id}-title`} tabIndex={-1}>{label}</h3><p>Upload a new document or reuse a file from your Evidence library.</p></div>
+      <div className={styles.fileActions}>
+        <button ref={chooseButton} type="button" className={styles.choose} disabled={actionsDisabled || busy || !canUpload || !library?.consent} onClick={() => fileInput.current?.click()}><Upload size={16} aria-hidden="true" />Upload file</button>
+        <button ref={browseButton} type="button" className={styles.choose} disabled={actionsDisabled || busy || !library} aria-expanded={browseOpen} onClick={() => setBrowseOpen(value => !value)}><FolderOpen size={16} aria-hidden="true" />Browse Evidence</button>
+      </div>
     </div>
     <label htmlFor={`${id}-file`} className={styles.srOnly}>Document for {label.toLowerCase()}</label>
-    <input ref={fileInput} id={`${id}-file`} className={styles.srOnly} tabIndex={-1} type="file" accept=".pdf,.docx,.txt,.md,.markdown,.csv,.json" disabled={disabled} onChange={chooseInput} />
+    <input ref={fileInput} id={`${id}-file`} className={styles.srOnly} tabIndex={-1} type="file" accept=".pdf,.docx,.txt,.md,.markdown,.csv,.json" disabled={actionsDisabled || busy || !canUpload || !library?.consent} onChange={chooseInput} />
     <p className={styles.fileHelp}>Or drop one file here, up to 10 MB. Text PDF, DOCX, TXT, Markdown, CSV or JSON. Scans and images need OCR first.</p>
-    <p className={styles.privacy}>Read only in your browser. Your file is not uploaded or added as evidence. Filled answers are saved with this form and still need review.</p>
-    {disabled && <p className={styles.fileHelp}>File import is unavailable while this form is saving or waiting for a conflict to be resolved.</p>}
+    <p className={styles.privacy}>New files are saved privately in Evidence. Text is read in your browser; only the answers you review and apply fill this form. Filling a form does not verify the evidence.</p>
+    {!canUpload && <p className={styles.fileHelp}>Uploads require a signed-in personal case. In the sample, Browse Evidence lets you try the fictional documents.</p>}
+    {canUpload && !library?.consent && <div className={styles.consent}>
+      <label><input type="checkbox" checked={consentChecked} disabled={actionsDisabled || consentBusy} onChange={event => setConsentChecked(event.target.checked)} /><span>I agree to save my uploaded files privately in Evidence. I understand that safety scanning and automated evidence processing are not yet available.</span></label>
+      <button type="button" className={styles.choose} disabled={!consentChecked || actionsDisabled || consentBusy} onClick={() => void saveConsent()}>{consentBusy && <Loader2 size={16} className={styles.spinner} aria-hidden="true" />}{consentBusy ? "Saving consent…" : "Save storage consent"}</button>
+    </div>}
+    {actionsDisabled && <p className={styles.fileHelp}>Wait for saving to finish or resolve the workspace message before continuing. Your document review stays here.</p>}
+    {browseOpen && library && <EvidencePicker documents={library.documents} folders={library.folders} disabled={actionsDisabled || busy} onChoose={document => void choose({ document })} onClose={closeBrowser} />}
     {busy && <div className={styles.progress} role="status"><Loader2 size={19} className={styles.spinner} aria-hidden="true" /><span>{progress || "Reading your document…"}</span><button type="button" className={styles.quiet} onClick={cancel}>Cancel import</button></div>}
-    {error && <div className={styles.error} role="alert"><p>{error}</p>{!busy && lastFile.current && !activeReview && <button type="button" className={styles.quiet} disabled={disabled} onClick={() => { if (lastFile.current) void choose(lastFile.current); }}>Retry this file</button>}</div>}
+    {error && <div className={styles.error} role="alert"><p>{error}</p>{!busy && lastSource.current && !activeReview && <button type="button" className={styles.quiet} disabled={actionsDisabled} onClick={() => { if (lastSource.current) void choose(lastSource.current); }}>Retry this file</button>}</div>}
     <p className={`${styles.notice} ${notice ? "" : styles.srOnly}`} role="status" aria-live="polite">{notice}</p>
     {activeReview && <div className={styles.review}>
       <div className={styles.reviewHeader}><div><h4 ref={reviewHeading} tabIndex={-1}>Review before filling</h4><p>{activeReview.fileName}</p></div><button type="button" className={styles.close} onClick={cancel} aria-label="Cancel file import"><X size={18} aria-hidden="true" /></button></div>
@@ -247,7 +313,7 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
         <label htmlFor={`${id}-text`}>Document text</label>
         <textarea id={`${id}-text`} className={styles.documentText} readOnly rows={8} value={activeReview.text} onSelect={event => { const element = event.currentTarget; setSelectedText(element.value.slice(element.selectionStart, element.selectionEnd)); }} aria-describedby={`${id}-text-help`} />
         <p id={`${id}-text-help`}>Select a passage to use as a proposed answer and source excerpt, then choose its field. You can also add an empty field and write the answer yourself.</p>
-        {assignable.length ? <div className={styles.assignment}><label htmlFor={`${id}-assignment`}>Assign to a field<select id={`${id}-assignment`} value={assignment} onChange={event => setAssignment(event.target.value)}><option value="">Choose a field</option>{assignable.map(field => <option key={field.key} value={field.key}>{field.label}</option>)}</select></label><button type="button" className={styles.choose} disabled={!assignment} onClick={addAssignment}>Add field</button></div> : <p>All fields are listed below. Edit their proposed values as needed.</p>}
+        {assignable.length ? <div className={styles.assignment}><label htmlFor={`${id}-assignment`}>Assign to a field<select id={`${id}-assignment`} value={assignment} disabled={actionsDisabled} onChange={event => setAssignment(event.target.value)}><option value="">Choose a field</option>{assignable.map(field => <option key={field.key} value={field.key}>{field.label}</option>)}</select></label><button type="button" className={styles.choose} disabled={!assignment || actionsDisabled} onClick={addAssignment}>Add field</button></div> : <p>All fields are listed below. Edit their proposed values as needed.</p>}
         {selectedText && <p className={styles.selectionNote}>{selectedText.length.toLocaleString()} characters selected from the document.</p>}
       </details>
       <div className={styles.suggestions}>
@@ -255,7 +321,7 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
           const field = fields.find(item => item.key === suggestion.key);
           if (!field) return null;
           return <div key={field.key} className={`${styles.suggestion} ${suggestion.selected ? styles.selected : ""}`}>
-            <label className={styles.selection}><input type="checkbox" checked={suggestion.selected} onChange={event => selectSuggestion(field.key, event.target.checked)} /><span>Fill {field.label}</span></label>
+            <label className={styles.selection}><input type="checkbox" disabled={actionsDisabled} checked={suggestion.selected} onChange={event => selectSuggestion(field.key, event.target.checked)} /><span>Fill {field.label}</span></label>
             <div className={styles.current}><strong>Current answer</strong><p>{displayValue(field, values[field.key])}</p></div>
             <label htmlFor={`${id}-value-${field.key}`} className={styles.valueLabel}>Proposed {field.label.toLowerCase()}</label>
             {editor(field, suggestion)}
@@ -265,7 +331,7 @@ export function FileFormImport({ fields, values, onApply, disabled = false, cont
           </div>;
         })}
       </div>
-      <div className={styles.applyRow}><button type="button" className={styles.apply} disabled={!selectedCount || disabled} onClick={apply}><Check size={17} aria-hidden="true" />Fill {selectedCount || "selected"} {selectedCount === 1 ? "field" : "fields"}</button><button type="button" className={styles.quiet} onClick={cancel}>Cancel import</button></div>
+      <div className={styles.applyRow}><button type="button" className={styles.apply} disabled={!selectedCount || actionsDisabled} onClick={apply}><Check size={17} aria-hidden="true" />Fill {selectedCount || "selected"} {selectedCount === 1 ? "field" : "fields"}</button><button type="button" className={styles.quiet} onClick={cancel}>Cancel import</button></div>
       <p className={styles.fileHelp}>{saveNote}</p>
     </div>}
   </section>;
