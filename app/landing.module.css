@@ -20,7 +20,7 @@
 .skipLink {position:absolute;left:20px;top:-80px;z-index:99;padding:12px 20px;background:#143b2e;color:#fff;border-radius:4px}
 .skipLink:focus {top:10px}
 .brand {display:inline-flex;align-items:center;font-size:23px;white-space:nowrap;line-height:1.2}
-.brandWithTagline {flex-direction:column;align-items:flex-start;gap:3px}
+.brandWithTagline {--brand-mark-size:60px;--brand-mark-gap:10px;--brand-mark-padding:0}
 .brandTagline {font-size:12px;line-height:15px;font-weight:400;letter-spacing:.2px;color:var(--landing-citrus)}
 .cinematicHeader {position:relative;z-index:10;border-bottom:1px solid #ffffff20;background:#082f26;color:#f5f8ec}
 .cinematicNav {display:flex;align-items:center;gap:36px;min-height:76px;padding:12px var(--page-gutter);width:100%}

@@ -24,7 +24,7 @@ const questions: { id?: string; q: string; a: string }[] = [
 ];
 
 function Brand({ showTagline = false }: { showTagline?: boolean }) {
-  return <Link className={`${styles.brand} ${showTagline ? styles.brandWithTagline : ""}`} href="/" aria-label="Harness Law home" aria-describedby={showTagline ? "launch-brand-tagline" : undefined}><BrandLogo inverse />{showTagline && <span id="launch-brand-tagline" className={styles.brandTagline}>Build with confidence.</span>}</Link>;
+  return <Link className={`${styles.brand} ${showTagline ? styles.brandWithTagline : ""}`} href="/" aria-label="Harness Law home" aria-describedby={showTagline ? "launch-brand-tagline" : undefined}><BrandLogo inverse tagline={showTagline ? "Build with confidence." : undefined} taglineId={showTagline ? "launch-brand-tagline" : undefined} taglineClassName={styles.brandTagline} /></Link>;
 }
 
 function ProductPreview() {
@@ -156,6 +156,6 @@ export default function Landing({ signedIn }: { signedIn: boolean }) {
       <section id="faqs" className={`${styles.container} ${styles.faqSection}`} aria-labelledby="faq-title"><div><p className={styles.eyebrow}>A FEW THINGS TO KNOW</p><h2 id="faq-title">A little more<br />{' '}clarity.</h2><p>Before you take the first step.</p></div><div className={styles.faqList}>{questions.map(item => <details key={item.q} id={item.id} className={styles.faq}><summary>{item.q}<ChevronDown size={20} aria-hidden="true" /></summary><p>{item.a}</p></details>)}</div></section>
       <section className={`${styles.container} ${styles.finalSection}`} aria-labelledby="final-title"><div className={styles.finalCta}><div><p className={styles.eyebrow}>THERE’S A STORY BEHIND YOUR WORK</p><h2 id="final-title">Give your next chapter<br />{' '}a thoughtful beginning.</h2><p>Start with what you know. Bring the rest together.</p></div><div className={styles.finalActions}><a className={styles.primaryButton} href={workspaceHref}>{signedIn ? "My workspace" : "Get started"}</a><span>Your personal EB-1A workspace.</span></div></div></section>
     </main>
-    <footer className={`${styles.container} ${styles.footer}`}><div className={styles.footerTop}><Brand /><nav aria-label="Footer navigation"><a href="#how-it-works">How it works</a><a href="/workspace?sample=1">Sample workspace</a><a href={signedIn ? "/workspace" : "/signin"}>{signedIn ? "My workspace" : "Log in"}</a></nav></div><div className={styles.footerBottom}><span>© {new Date().getFullYear()} Harness Law</span><p>A preparation workspace. Not legal advice, an eligibility decision, or a filing service.</p></div></footer>
+    <footer className={`${styles.container} ${styles.footer}`}><div className={styles.footerTop}><Brand /><nav aria-label="Footer navigation"><a href="/privacy">Privacy</a><a href="#how-it-works">How it works</a><a href="/workspace?sample=1">Sample workspace</a><a href={signedIn ? "/workspace" : "/signin"}>{signedIn ? "My workspace" : "Log in"}</a></nav></div><div className={styles.footerBottom}><span>© {new Date().getFullYear()} Harness Law</span><p>A preparation workspace. Not legal advice, an eligibility decision, or a filing service.</p></div></footer>
   </div>;
 }

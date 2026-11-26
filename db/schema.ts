@@ -45,3 +45,62 @@ export const authSessions=sqliteTable('auth_sessions',{
   fullName:text('full_name'),
   expiresAt:integer('expires_at').notNull(),
 },table=>[index('auth_sessions_expiry').on(table.expiresAt)]);
+
+export const adminOwner=sqliteTable('admin_owner',{
+  id:text('id').primaryKey(),
+  userId:text('user_id').notNull(),
+  provider:text('provider').notNull(),
+  email:text('email').notNull(),
+  displayName:text('display_name').notNull(),
+  createdAt:integer('created_at').notNull(),
+});
+
+export const adminMembers=sqliteTable('admin_members',{
+  userId:text('user_id').primaryKey(),
+  provider:text('provider').notNull(),
+  email:text('email').notNull(),
+  displayName:text('display_name').notNull(),
+  createdAt:integer('created_at').notNull(),
+  createdBy:text('created_by').notNull(),
+});
+
+export const adminAudit=sqliteTable('admin_audit',{
+  id:text('id').primaryKey(),
+  action:text('action').notNull(),
+  actorId:text('actor_id').notNull(),
+  actorEmail:text('actor_email').notNull(),
+  targetId:text('target_id').notNull(),
+  targetEmail:text('target_email').notNull(),
+  createdAt:integer('created_at').notNull(),
+},table=>[index('admin_audit_created').on(table.createdAt)]);
+
+export const analyticsUsers=sqliteTable('analytics_users',{
+  userId:text('user_id').primaryKey(),
+  provider:text('provider').notNull(),
+  email:text('email').notNull(),
+  displayName:text('display_name').notNull(),
+  firstSeen:integer('first_seen').notNull(),
+  lastSeen:integer('last_seen').notNull(),
+  lastCountry:text('last_country'),
+  lastRegion:text('last_region'),
+  lastCity:text('last_city'),
+},table=>[index('analytics_users_last_seen').on(table.lastSeen),index('analytics_users_first_seen').on(table.firstSeen)]);
+
+export const analyticsEvents=sqliteTable('analytics_events',{
+  id:text('id').primaryKey(),
+  userId:text('user_id'),
+  kind:text('kind').notNull(),
+  page:text('page').notNull(),
+  country:text('country'),
+  region:text('region'),
+  city:text('city'),
+  device:text('device').notNull(),
+  browser:text('browser').notNull(),
+  referrer:text('referrer').notNull(),
+  createdAt:integer('created_at').notNull(),
+},table=>[index('analytics_events_created').on(table.createdAt),index('analytics_events_user_created').on(table.userId,table.createdAt),index('analytics_events_kind_created').on(table.kind,table.createdAt)]);
+
+export const analyticsMeta=sqliteTable('analytics_meta',{
+  key:text('key').primaryKey(),
+  value:text('value').notNull(),
+});

@@ -1,7 +1,7 @@
 .logo {
   display: inline-flex;
   align-items: center;
-  gap: .55em;
+  gap: var(--brand-mark-gap, .55em);
   color: var(--brand-forest, #082f26);
   font-family: var(--font-brand-sans, 'DM Sans', 'Segoe UI', sans-serif);
   font-size: var(--logo-size, inherit);
@@ -12,11 +12,27 @@
 }
 .mark {
   display: block;
-  width: 1.35em;
-  height: 1.35em;
+  box-sizing: border-box;
+  width: var(--brand-mark-size, max(26px, 1.65em));
+  height: var(--brand-mark-size, max(26px, 1.65em));
   flex: 0 0 auto;
-  color: inherit;
+  padding: var(--brand-mark-padding, .14em);
+  border-radius: .3em;
+  background: var(--brand-forest, #082f26);
+  object-fit: contain;
+}
+.copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--brand-tagline-gap, 6px);
 }
 .wordmark { display: block; }
+.tagline {
+  font-size: 12px;
+  line-height: 15px;
+  font-weight: 400;
+  letter-spacing: .2px;
+}
 .inverse { color: #f4f6ea; }
-.inverse .mark { color: var(--brand-citrus, #d8ed94); }
+.inverse .mark { background: transparent; }
