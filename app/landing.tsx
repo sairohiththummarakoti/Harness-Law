@@ -23,8 +23,8 @@ const questions: { id?: string; q: string; a: string }[] = [
   { q: "Does Harness Law provide legal advice or file my petition?", a: "No. This is a preparation workspace, not legal advice, a determination of eligibility, or an attorney service. Live AI drafting, document extraction, official form assembly, and petition filing are not connected. A qualified immigration attorney can advise you on your individual circumstances." },
 ];
 
-function Brand({ showTagline = false }: { showTagline?: boolean }) {
-  return <Link className={`${styles.brand} ${showTagline ? styles.brandWithTagline : ""}`} href="/" aria-label="Harness Law home" aria-describedby={showTagline ? "launch-brand-tagline" : undefined}><BrandLogo inverse tagline={showTagline ? "Build with confidence." : undefined} taglineId={showTagline ? "launch-brand-tagline" : undefined} taglineClassName={styles.brandTagline} /></Link>;
+function Brand({ prominent = false }: { prominent?: boolean }) {
+  return <Link className={`${styles.brand} ${prominent ? styles.headerBrand : ""}`} href="/" aria-label="Harness Law home"><BrandLogo inverse /></Link>;
 }
 
 function ProductPreview() {
@@ -105,6 +105,8 @@ export default function Landing({ signedIn }: { signedIn: boolean }) {
   const [stage, setStage] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const workspaceHref = signedIn ? "/workspace" : "/signup";
+  const accountHref = signedIn ? "/workspace" : "/signin";
+  const accountLabel = signedIn ? "My workspace" : "Sign in";
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const active = stages[stage];
   function handleTabs(event: KeyboardEvent<HTMLButtonElement>, index: number) {
@@ -122,11 +124,11 @@ export default function Landing({ signedIn }: { signedIn: boolean }) {
     <a className={styles.skipLink} href="#main-content">Skip to content</a>
     <header className={styles.cinematicHeader}>
       <div className={styles.cinematicNav}>
-        <Brand showTagline />
+        <Brand prominent />
         <nav className={styles.audienceNav} aria-label="Main navigation"><a href="#individuals">For individuals</a><a href="#businesses">For businesses</a><a href="#attorney-review">Attorneys</a></nav>
-        <div className={styles.cinematicActions}><a className={styles.navResource} href="#how-it-works">Resources</a><a className={styles.navResource} href="#about">About us</a>{!signedIn && <a className={styles.signInButton} href="/signin">Sign in</a>}<a className={styles.getStartedButton} href={workspaceHref}>{signedIn ? "My workspace" : "Get started"}</a><button type="button" className={styles.cinematicMenuButton} aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} aria-controls="mobile-navigation" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={22} /> : <Menu size={22} />}</button></div>
+        <div className={styles.cinematicActions}><a className={styles.navResource} href="#how-it-works">Resources</a><a className={styles.navResource} href="#about">About us</a><a className={styles.accountButton} href={accountHref}>{accountLabel}</a><button type="button" className={styles.cinematicMenuButton} aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} aria-controls="mobile-navigation" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={22} /> : <Menu size={22} />}</button></div>
       </div>
-      {menuOpen && <nav className={styles.cinematicMobileNav} id="mobile-navigation" aria-label="Mobile navigation"><a onClick={() => setMenuOpen(false)} href="#individuals">For individuals</a><a onClick={() => setMenuOpen(false)} href="#businesses">For businesses</a><a onClick={() => setMenuOpen(false)} href="#attorney-review">Attorneys</a><a onClick={() => setMenuOpen(false)} href="#how-it-works">Resources</a><a onClick={() => setMenuOpen(false)} href="#about">About us</a>{!signedIn && <a href="/signin">Sign in</a>}<a href={workspaceHref}>{signedIn ? "My workspace" : "Get started"}</a></nav>}
+      {menuOpen && <nav className={styles.cinematicMobileNav} id="mobile-navigation" aria-label="Mobile navigation"><a onClick={() => setMenuOpen(false)} href="#individuals">For individuals</a><a onClick={() => setMenuOpen(false)} href="#businesses">For businesses</a><a onClick={() => setMenuOpen(false)} href="#attorney-review">Attorneys</a><a onClick={() => setMenuOpen(false)} href="#how-it-works">Resources</a><a onClick={() => setMenuOpen(false)} href="#about">About us</a><a href={accountHref}>{accountLabel}</a></nav>}
     </header>
     <main id="main-content">
       <section className={styles.cinematicHero} aria-labelledby="hero-title">
@@ -136,7 +138,7 @@ export default function Landing({ signedIn }: { signedIn: boolean }) {
             <p className={styles.heroBadge}>A NEW PERSPECTIVE ON EB-1A PREPARATION</p>
             <h1 id="hero-title">Your talent.<br /><span>A new horizon.</span></h1>
             <p className={styles.heroDescription}>You’ve built a career worth telling. Bring your achievements, evidence, and ambitions together and take a thoughtful next step.</p>
-            <div className={styles.heroLinks}><a className={styles.heroStartButton} href={workspaceHref}>{signedIn ? "Continue in my workspace" : "Begin your next chapter"}</a></div>
+            <div className={styles.heroLinks}><a className={styles.heroStartButton} href={workspaceHref}>Build with confidence</a></div>
           </div>
         </div>
         <div className={styles.heroFoot}><a href="#individuals">Discover a clearer way to prepare <ChevronDown size={18} aria-hidden="true" /></a><span>YOUR EXPERIENCE. YOUR EVIDENCE. YOUR STORY.</span></div>
@@ -154,8 +156,8 @@ export default function Landing({ signedIn }: { signedIn: boolean }) {
         <article><span className={styles.capabilityIcon}><ShieldCheck size={25} /></span><div><h3>Open questions stay visible</h3><p>Track unresolved facts and review needs. A completed step never turns an unverified claim into a confirmed fact.</p></div></article>
       </div></section>
       <section id="faqs" className={`${styles.container} ${styles.faqSection}`} aria-labelledby="faq-title"><div><p className={styles.eyebrow}>A FEW THINGS TO KNOW</p><h2 id="faq-title">A little more<br />{' '}clarity.</h2><p>Before you take the first step.</p></div><div className={styles.faqList}>{questions.map(item => <details key={item.q} id={item.id} className={styles.faq}><summary>{item.q}<ChevronDown size={20} aria-hidden="true" /></summary><p>{item.a}</p></details>)}</div></section>
-      <section className={`${styles.container} ${styles.finalSection}`} aria-labelledby="final-title"><div className={styles.finalCta}><div><p className={styles.eyebrow}>THERE’S A STORY BEHIND YOUR WORK</p><h2 id="final-title">Give your next chapter<br />{' '}a thoughtful beginning.</h2><p>Start with what you know. Bring the rest together.</p></div><div className={styles.finalActions}><a className={styles.primaryButton} href={workspaceHref}>{signedIn ? "My workspace" : "Get started"}</a><span>Your personal EB-1A workspace.</span></div></div></section>
+      <section className={`${styles.container} ${styles.finalSection}`} aria-labelledby="final-title"><div className={styles.finalCta}><div><p className={styles.eyebrow}>THERE’S A STORY BEHIND YOUR WORK</p><h2 id="final-title">Give your next chapter<br />{' '}a thoughtful beginning.</h2><p>Start with what you know. Bring the rest together.</p></div><div className={styles.finalActions}><a className={styles.primaryButton} href={accountHref}>{accountLabel}</a><span>Your personal EB-1A workspace.</span></div></div></section>
     </main>
-    <footer className={`${styles.container} ${styles.footer}`}><div className={styles.footerTop}><Brand /><nav aria-label="Footer navigation"><a href="/privacy">Privacy</a><a href="#how-it-works">How it works</a><a href="/workspace?sample=1">Sample workspace</a><a href={signedIn ? "/workspace" : "/signin"}>{signedIn ? "My workspace" : "Log in"}</a></nav></div><div className={styles.footerBottom}><span>© {new Date().getFullYear()} Harness Law</span><p>A preparation workspace. Not legal advice, an eligibility decision, or a filing service.</p></div></footer>
+    <footer className={`${styles.container} ${styles.footer}`}><div className={styles.footerTop}><Brand /><nav aria-label="Footer navigation"><a href="/privacy">Privacy</a><a href="#how-it-works">How it works</a><a href="/workspace?sample=1">Sample workspace</a><a href={accountHref}>{accountLabel}</a></nav></div><div className={styles.footerBottom}><span>© {new Date().getFullYear()} Harness Law</span><p>A preparation workspace. Not legal advice, an eligibility decision, or a filing service.</p></div></footer>
   </div>;
 }

@@ -21,18 +21,6 @@
   background: var(--brand-forest, #082f26);
   object-fit: contain;
 }
-.copy {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--brand-tagline-gap, 6px);
-}
 .wordmark { display: block; }
-.tagline {
-  font-size: 12px;
-  line-height: 15px;
-  font-weight: 400;
-  letter-spacing: .2px;
-}
 .inverse { color: #f4f6ea; }
 .inverse .mark { background: transparent; }

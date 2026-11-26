@@ -455,7 +455,7 @@ export default function Workspace({ user, forceSample = false, canAccessAdmin = 
     {mobileOpen && <button className="nav-overlay" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
     <aside id="workspace-navigation" className="sidebar" aria-label="Primary navigation">
       <button className="brand" onClick={() => navigate("dashboard")} aria-label="Harness Law overview" title="Overview">
-        <span className="sidebar-brand-full"><BrandLogo inverse tagline="YOUR NEXT CHAPTER" taglineClassName="brand-tag" /></span>
+        <span className="sidebar-brand-full"><BrandLogo inverse /></span>
         <span className="sidebar-brand-mark" aria-hidden="true"><BrandMark /></span>
       </button>
       <button className="icon-button sidebar-toggle" type="button" onClick={toggleSidebar} aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!sidebarCollapsed} aria-controls="workspace-navigation">{sidebarCollapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}<span>{sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}</span></button>
